@@ -187,7 +187,6 @@ Environment=RNE_NETWORK_HELPER=${NETWORK_HELPER}
 ExecStart=${NODE_BIN} ${APP_DIR}/server.js
 Restart=on-failure
 RestartSec=5
-NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict

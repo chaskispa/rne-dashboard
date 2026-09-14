@@ -89,6 +89,9 @@ la red desde el dashboard. Raspberry Pi OS Bookworm usa NetworkManager por
 defecto; si `nmcli` no está disponible, el dashboard muestra la función como no
 disponible sin modificar la configuración de red existente.
 
+El servicio puede elevar privilegios únicamente mediante el helper de red
+instalado como `root`; el archivo de `sudoers` no autoriza otros comandos.
+
 Comandos útiles:
 
 ```sh

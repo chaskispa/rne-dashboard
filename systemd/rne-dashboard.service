@@ -17,7 +17,6 @@ Environment=RNE_NETWORK_HELPER=/usr/local/lib/rne-dashboard/network-helper
 ExecStart=/usr/bin/node /opt/rne-dashboard/server.js
 Restart=on-failure
 RestartSec=5
-NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
