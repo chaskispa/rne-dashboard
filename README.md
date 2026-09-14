@@ -111,7 +111,8 @@ segmentación) y enviarla por HTTP, no por UDP.
 
 ## Identidad visual
 
-El dashboard utiliza el logo oficial, la paleta roja/gris y las tipografías
-Geist Sans/Mono empleadas por [CHASKI](https://chsk.net). Los recursos se
-guardan localmente en `public/assets` para que la interfaz funcione sin depender
-de Internet después de instalarla.
+El dashboard utiliza el logo oficial y las tipografías Geist Sans/Mono empleadas
+por [CHASKI](https://chsk.net). La interfaz es deliberadamente monocromática y
+reserva el rojo de marca para la línea superior. Los recursos se guardan
+localmente en `public/assets` para funcionar sin depender de Internet después de
+instalarla.
