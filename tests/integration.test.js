@@ -62,7 +62,7 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
   await writeFile(path.join(dataDir, 'config.json'), JSON.stringify({
     panels: [{
       id: 'test-panel', name: 'Panel test', host: '127.0.0.1', port: udpPort,
-      source: 'total', template: 'TOTAL {total_minutes} MIN', enabled: true
+      source: 'total', template: '', unit: 'auto', showLabel: false, enabled: true
     }]
   }));
 
@@ -87,7 +87,7 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
   for (let attempt = 0; attempt < 30 && !udpMessages.length; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  assert.deepEqual(udpMessages, ['TOTAL 2835 MIN']);
+  assert.deepEqual(udpMessages, ['2 DÍAS']);
 
   const stateResponse = await fetch(`http://127.0.0.1:${dashboardPort}/api/state`);
   assert.equal(stateResponse.status, 200);

@@ -30,6 +30,7 @@ const API_BASE_URL = process.env.NODE_ENV === 'test' && process.env.RNE_TEST_API
   : PRODUCTION_API_BASE_URL;
 const CATEGORIES = ['hospitalario', 'tramites', 'transporte', 'vivienda', 'otro'];
 const SOURCE_TYPES = ['total', ...CATEGORIES, 'latest_wait', 'latest_testimony', 'custom'];
+const DISPLAY_UNITS = ['auto', 'minutes', 'hours', 'days', 'months', 'years'];
 
 const defaultConfig = {
   panels: []
@@ -75,6 +76,8 @@ function validatePanel(candidate, existing = {}) {
   panel.port = Number(panel.port ?? 5000);
   panel.source = String(panel.source || 'total');
   panel.template = String(panel.template || '').trim().slice(0, 240);
+  panel.unit = DISPLAY_UNITS.includes(panel.unit) ? panel.unit : 'auto';
+  panel.showLabel = panel.showLabel !== false;
   panel.enabled = panel.enabled !== false;
   if (!panel.name) throw new Error('El panel necesita un nombre.');
   if (!isIpv4OrHostname(panel.host)) throw new Error('La dirección del panel no es válida.');
@@ -207,27 +210,83 @@ function contextFromResults(data) {
   };
 }
 
-function defaultTemplate(source) {
-  const templates = {
-    total: 'TOTAL {total_hours} H',
-    hospitalario: 'HOSPITAL {hospitalario} MIN',
-    tramites: 'TRAMITES {tramites} MIN',
-    transporte: 'TRANSPORTE {transporte} MIN',
-    vivienda: 'VIVIENDA {vivienda} MIN',
-    otro: 'OTRO {otro} MIN',
-    latest_wait: '{latest_comuna}: {latest_minutes} MIN',
-    latest_testimony: '{latest_testimony}',
-    custom: '{total_minutes} MIN'
+function durationUnit(minutes, requestedUnit = 'auto') {
+  if (requestedUnit !== 'auto') return requestedUnit;
+  const absolute = Math.abs(minutes);
+  if (absolute < 60) return 'minutes';
+  if (absolute < 60 * 24) return 'hours';
+  if (absolute < 60 * 24 * 30) return 'days';
+  if (absolute < 60 * 24 * 365) return 'months';
+  return 'years';
+}
+
+function formatDuration(minutes, requestedUnit = 'auto') {
+  const unit = durationUnit(minutes, requestedUnit);
+  const divisors = {
+    minutes: 1,
+    hours: 60,
+    days: 60 * 24,
+    months: 60 * 24 * 30,
+    years: 60 * 24 * 365
   };
-  return templates[source] || templates.total;
+  const rawValue = minutes / divisors[unit];
+  const value = unit === 'minutes'
+    ? Math.round(rawValue)
+    : Number(rawValue.toFixed(Math.abs(rawValue) < 100 ? 1 : 0));
+  const labels = {
+    minutes: 'MIN',
+    hours: 'H',
+    days: Math.abs(value) === 1 ? 'DÍA' : 'DÍAS',
+    months: Math.abs(value) === 1 ? 'MES' : 'MESES',
+    years: Math.abs(value) === 1 ? 'AÑO' : 'AÑOS'
+  };
+  return {
+    value: new Intl.NumberFormat('es-CL', { maximumFractionDigits: 1 }).format(value),
+    unit: labels[unit]
+  };
+}
+
+function timedPanelValue(panel, context) {
+  const values = {
+    total: context.total_minutes,
+    hospitalario: context.hospitalario,
+    tramites: context.tramites,
+    transporte: context.transporte,
+    vivienda: context.vivienda,
+    otro: context.otro,
+    latest_wait: context.latest_minutes
+  };
+  return values[panel.source];
+}
+
+function timedPanelLabel(panel, context) {
+  const labels = {
+    total: 'TOTAL',
+    hospitalario: 'HOSPITALARIO',
+    tramites: 'TRÁMITES',
+    transporte: 'TRANSPORTE',
+    vivienda: 'VIVIENDA',
+    otro: 'OTRO',
+    latest_wait: context.latest_comuna
+  };
+  return labels[panel.source];
 }
 
 function renderPanelMessage(panel, data) {
   const context = contextFromResults(data);
-  const template = panel.template || defaultTemplate(panel.source);
-  const rendered = template.replace(/\{([a-z_]+)\}/g, (match, key) => (
-    Object.hasOwn(context, key) ? String(context[key]) : match
-  ));
+  const minutes = timedPanelValue(panel, context);
+  let rendered;
+  if (minutes !== undefined) {
+    const duration = formatDuration(minutes, panel.unit);
+    rendered = `${panel.showLabel ? `${timedPanelLabel(panel, context)} ` : ''}${duration.value} ${duration.unit}`;
+  } else if (panel.source === 'latest_testimony') {
+    rendered = context.latest_testimony;
+  } else {
+    const template = panel.template || '{total_minutes} MIN';
+    rendered = template.replace(/\{([a-z_]+)\}/g, (match, key) => (
+      Object.hasOwn(context, key) ? String(context[key]) : match
+    ));
+  }
   return Array.from(rendered.replace(/[\r\n]+/g, ' ').trim()).slice(0, 80).join('') || 'SIN DATOS';
 }
 

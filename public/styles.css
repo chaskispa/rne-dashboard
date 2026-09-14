@@ -153,6 +153,7 @@ input:focus, select:focus { border-color: var(--text); box-shadow: 4px 4px 0 rgb
 .token-help { margin: -5px 0 18px; color: var(--muted); font-size: .75rem; line-height: 1.55; }
 .switch-row { display: flex; align-items: center; gap: 9px; }
 .switch-row input { width: 18px; height: 18px; margin: 0; accent-color: var(--red); }
+.format-switch { min-height: 68px; margin-top: 0; padding-top: 22px; align-items: center; }
 .form-error { min-height: 18px; color: var(--red); font-size: .8rem; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 10px; }
 .network-dialog { width: min(720px, calc(100vw - 28px)); }

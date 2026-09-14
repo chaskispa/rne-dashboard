@@ -148,10 +148,25 @@
         </label>
         <label>Puerto UDP<input id="panelPort" type="number" min="1" max="65535" value="5000" required></label>
       </div>
-      <label>Plantilla <span class="optional">opcional</span>
-        <input id="panelTemplate" maxlength="240" placeholder="TOTAL {total_hours} H">
-      </label>
-      <p class="token-help">Variables: {total_minutes}, {total_hours}, {hospitalario}, {tramites}, {latest_minutes}, {latest_comuna}, {latest_testimony}</p>
+      <div id="timeFormatFields" class="form-grid two">
+        <label>Unidad
+          <select id="panelUnit">
+            <option value="auto">Automática</option>
+            <option value="minutes">Minutos</option>
+            <option value="hours">Horas</option>
+            <option value="days">Días</option>
+            <option value="months">Meses (30 días)</option>
+            <option value="years">Años (365 días)</option>
+          </select>
+        </label>
+        <label class="switch-row format-switch"><input id="panelShowLabel" type="checkbox" checked><span>Mostrar etiqueta o área</span></label>
+      </div>
+      <div id="templateField" hidden>
+        <label>Plantilla personalizada
+          <input id="panelTemplate" maxlength="240" placeholder="TOTAL {total_minutes} MIN">
+        </label>
+        <p class="token-help">Variables: {total_minutes}, {total_hours}, {hospitalario}, {tramites}, {latest_minutes}, {latest_comuna}, {latest_testimony}</p>
+      </div>
       <label class="switch-row"><input id="panelEnabled" type="checkbox" checked><span>Ruta activa</span></label>
       <p class="form-error" id="panelError" role="alert"></p>
       <div class="dialog-actions">

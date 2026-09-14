@@ -11,6 +11,10 @@ const categoryLabels = {
   hospitalario: 'Hospitalario', tramites: 'Trámites', transporte: 'Transporte',
   vivienda: 'Vivienda', otro: 'Otro'
 };
+const timedSources = ['total', 'hospitalario', 'tramites', 'transporte', 'vivienda', 'otro', 'latest_wait'];
+const unitLabels = {
+  auto: 'Unidad automática', minutes: 'Minutos', hours: 'Horas', days: 'Días', months: 'Meses', years: 'Años'
+};
 
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>'"]/g, (character) => ({
@@ -105,7 +109,11 @@ function renderPanels() {
     return `<article class="panel-row ${panel.enabled ? '' : 'disabled'}" data-panel-id="${escapeHtml(panel.id)}">
       ${ledIcon()}
       <div><p class="panel-name">${escapeHtml(panel.name)}</p><div class="panel-meta">${escapeHtml(panel.host)}:${panel.port}</div><div class="send-status"><i class="status-dot ${statusClass}"></i>${escapeHtml(statusText)}</div></div>
-      <div class="route-source"><strong>${escapeHtml(sourceLabels[panel.source] || panel.source)}</strong>${escapeHtml(panel.template || 'Plantilla automática')}</div>
+      <div class="route-source"><strong>${escapeHtml(sourceLabels[panel.source] || panel.source)}</strong>${escapeHtml(
+        timedSources.includes(panel.source)
+          ? `${panel.showLabel === false ? 'Solo tiempo' : 'Con etiqueta'} · ${unitLabels[panel.unit || 'auto']}`
+          : panel.source === 'custom' ? (panel.template || 'Plantilla personalizada') : 'Texto público'
+      )}</div>
       <div class="panel-actions">
         <button class="small-action" data-action="test" title="Enviar prueba" aria-label="Probar ${escapeHtml(panel.name)}">Probar</button>
         <button class="small-action" data-action="edit" title="Editar" aria-label="Editar ${escapeHtml(panel.name)}">Editar</button>
@@ -275,13 +283,23 @@ function openPanelDialog(panel = null) {
   $('#panelPort').value = panel?.port || 5000;
   $('#panelSource').value = panel?.source || 'total';
   $('#panelTemplate').value = panel?.template || '';
+  $('#panelUnit').value = panel?.unit || 'auto';
+  $('#panelShowLabel').checked = panel?.showLabel !== false;
   $('#panelEnabled').checked = panel?.enabled !== false;
+  updatePanelFormatFields();
   $('#panelError').textContent = '';
   $('#panelDialog').showModal();
   $('#panelName').focus();
 }
 
+function updatePanelFormatFields() {
+  const source = $('#panelSource').value;
+  $('#timeFormatFields').hidden = !timedSources.includes(source);
+  $('#templateField').hidden = source !== 'custom';
+}
+
 $('#addPanelButton').addEventListener('click', () => openPanelDialog());
+$('#panelSource').addEventListener('change', updatePanelFormatFields);
 $('#networkButton').addEventListener('click', openNetworkDialog);
 $$('[data-close-dialog]').forEach((button) => button.addEventListener('click', () => button.closest('dialog').close()));
 $$('.dialog').forEach((dialog) => dialog.addEventListener('click', (event) => {
@@ -294,7 +312,8 @@ $('#panelForm').addEventListener('submit', async (event) => {
   const payload = {
     name: $('#panelName').value, host: $('#panelHost').value,
     port: Number($('#panelPort').value), source: $('#panelSource').value,
-    template: $('#panelTemplate').value, enabled: $('#panelEnabled').checked
+    template: $('#panelTemplate').value, unit: $('#panelUnit').value,
+    showLabel: $('#panelShowLabel').checked, enabled: $('#panelEnabled').checked
   };
   try {
     await request(id ? `/api/panels/${id}` : '/api/panels', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
@@ -445,7 +464,7 @@ function registerWebMcpTools() {
         totalMinutes: state.data.results?.tiempo_total ?? null,
         lastPollAt: state.data.lastPollAt,
         detectedLanDevices: state.data.lan?.devices?.length || 0,
-        panels: state.data.config.panels.map(({ id, name, host, port, source, enabled }) => ({ id, name, host, port, source, enabled }))
+        panels: state.data.config.panels.map(({ id, name, host, port, source, unit, showLabel, enabled }) => ({ id, name, host, port, source, unit, showLabel, enabled }))
       };
     }
   });

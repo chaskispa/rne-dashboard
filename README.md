@@ -44,7 +44,17 @@ Variables opcionales:
 PORT=4173 HOST=0.0.0.0 RNE_DATA_DIR=./data npm start
 ```
 
-## Plantillas
+## Formato de tiempo
+
+La API entrega todos los valores en minutos (`unidad_tiempo: "minutos"`). Para
+cada panel se puede elegir minutos, horas, días, meses, años o conversión
+automática. La unidad siempre se agrega al final del mensaje. Para la conversión
+se consideran 30 días por mes y 365 días por año.
+
+La opción **Mostrar etiqueta o área** permite elegir entre, por ejemplo,
+`TRÁMITES 8,4 MESES` y solamente `8,4 MESES`.
+
+## Plantillas personalizadas
 
 Cada ruta acepta estas variables:
 
