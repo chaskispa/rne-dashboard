@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101512">
+  <meta name="description" content="Monitoreo y enrutamiento de datos RNE hacia paneles LED por UDP.">
+  <title>RNE · Centro de control</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="RNE, centro de control">
+      <span class="brand-mark" aria-hidden="true">RNE</span>
+      <span>Centro de control</span>
+    </a>
+    <div class="topbar-actions">
+      <div class="live-state" id="liveState"><span class="pulse"></span><span>Conectando</span></div>
+      <button class="button ghost" id="networkButton" type="button">Red Raspberry</button>
+      <button class="button primary" id="syncButton" type="button">Actualizar ahora</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="summary" aria-labelledby="summaryTitle">
+      <div class="summary-heading">
+        <div>
+          <p class="eyebrow">REGISTRO NACIONAL DE ESPERA</p>
+          <h1 id="summaryTitle">Operación en tiempo real</h1>
+        </div>
+        <p class="cycle" id="cycleLabel">Ciclo automático cada 30 segundos</p>
+      </div>
+      <div class="metric-grid">
+        <article class="metric metric-accent">
+          <span class="metric-label">Tiempo acumulado</span>
+          <strong id="totalTime">—</strong>
+          <span class="metric-note" id="totalMinutes">Esperando datos</span>
+        </article>
+        <article class="metric">
+          <span class="metric-label">Estado API</span>
+          <strong id="apiStatus">Sin conexión</strong>
+          <span class="metric-note" id="apiDetail">Aún no se completa un ciclo</span>
+        </article>
+        <article class="metric">
+          <span class="metric-label">Rutas activas</span>
+          <strong id="activeRoutes">0</strong>
+          <span class="metric-note" id="routeDetail">Agrega el primer panel</span>
+        </article>
+        <article class="metric">
+          <span class="metric-label">Próxima consulta</span>
+          <strong id="countdown">—</strong>
+          <span class="metric-note" id="lastUpdate">Nunca actualizado</span>
+        </article>
+      </div>
+    </section>
+
+    <div class="workspace-grid">
+      <div class="main-column">
+        <section class="panel-card" aria-labelledby="routingTitle">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">SALIDAS UDP</p>
+              <h2 id="routingTitle">Enrutamiento de paneles</h2>
+            </div>
+            <button class="button secondary" id="addPanelButton" type="button">+ Agregar panel</button>
+          </div>
+          <div id="panelList" class="panel-list"></div>
+        </section>
+
+        <section class="panel-card" aria-labelledby="areasTitle">
+          <div class="section-head compact">
+            <div>
+              <p class="eyebrow">DISTRIBUCIÓN</p>
+              <h2 id="areasTitle">Tiempo por área</h2>
+            </div>
+            <span class="timestamp" id="dataTimestamp">Sin datos</span>
+          </div>
+          <div id="areaBars" class="area-bars"></div>
+        </section>
+      </div>
+
+      <aside class="activity panel-card" aria-labelledby="activityTitle">
+        <div class="section-head compact">
+          <div>
+            <p class="eyebrow">TRÁFICO</p>
+            <h2 id="activityTitle">Actividad</h2>
+          </div>
+          <div class="traffic-filters" role="group" aria-label="Filtrar actividad">
+            <button class="filter active" data-filter="all" type="button">Todo</button>
+            <button class="filter" data-filter="api" type="button">API</button>
+            <button class="filter" data-filter="udp" type="button">UDP</button>
+          </div>
+        </div>
+        <div id="activityList" class="activity-list" aria-live="polite"></div>
+      </aside>
+    </div>
+  </main>
+
+  <dialog id="panelDialog" class="dialog">
+    <form id="panelForm" method="dialog">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">RUTA UDP</p>
+          <h2 id="panelDialogTitle">Agregar panel</h2>
+        </div>
+        <button class="icon-button" value="cancel" aria-label="Cerrar" type="button" data-close-dialog>×</button>
+      </div>
+      <input id="panelId" type="hidden">
+      <div class="form-grid two">
+        <label>Nombre<input id="panelName" maxlength="60" required placeholder="Panel acceso norte"></label>
+        <label>Dirección IP<input id="panelHost" required placeholder="192.168.1.50" inputmode="url"></label>
+      </div>
+      <div class="form-grid two narrow-second">
+        <label>Contenido
+          <select id="panelSource">
+            <option value="total">Tiempo total</option>
+            <option value="hospitalario">Hospitalario</option>
+            <option value="tramites">Trámites</option>
+            <option value="transporte">Transporte</option>
+            <option value="vivienda">Vivienda</option>
+            <option value="otro">Otro</option>
+            <option value="latest_wait">Última espera</option>
+            <option value="latest_testimony">Último testimonio</option>
+            <option value="custom">Plantilla personalizada</option>
+          </select>
+        </label>
+        <label>Puerto UDP<input id="panelPort" type="number" min="1" max="65535" value="5000" required></label>
+      </div>
+      <label>Plantilla <span class="optional">opcional</span>
+        <input id="panelTemplate" maxlength="240" placeholder="TOTAL {total_hours} H">
+      </label>
+      <p class="token-help">Variables: {total_minutes}, {total_hours}, {hospitalario}, {tramites}, {latest_minutes}, {latest_comuna}, {latest_testimony}</p>
+      <label class="switch-row"><input id="panelEnabled" type="checkbox" checked><span>Ruta activa</span></label>
+      <p class="form-error" id="panelError" role="alert"></p>
+      <div class="dialog-actions">
+        <button class="button ghost" type="button" data-close-dialog>Cancelar</button>
+        <button class="button primary" type="submit">Guardar ruta</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="testDialog" class="dialog small">
+    <form id="testForm" method="dialog">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">ENVÍO DIRECTO</p>
+          <h2>Probar panel</h2>
+        </div>
+        <button class="icon-button" value="cancel" aria-label="Cerrar" type="button" data-close-dialog>×</button>
+      </div>
+      <input id="testPanelId" type="hidden">
+      <label>Mensaje<input id="testMessage" maxlength="80" value="PRUEBA RNE" required></label>
+      <p class="token-help">El controlador acepta hasta 80 caracteres en modo animado.</p>
+      <p class="form-error" id="testError" role="alert"></p>
+      <div class="dialog-actions">
+        <button class="button ghost" type="button" data-close-dialog>Cancelar</button>
+        <button class="button primary" type="submit">Enviar por UDP</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="networkDialog" class="dialog network-dialog">
+    <div class="dialog-body">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">NETWORKMANAGER</p>
+          <h2>Red de la Raspberry</h2>
+        </div>
+        <button class="icon-button" aria-label="Cerrar" type="button" data-close-dialog>×</button>
+      </div>
+
+      <div id="networkStatus" class="network-status">Consultando interfaces…</div>
+
+      <label>Clave de administración
+        <input id="networkAdminKey" type="password" autocomplete="current-password" placeholder="Mostrada al instalar">
+      </label>
+      <p class="token-help warning">Aplicar cambios puede modificar la dirección IP y desconectar este dashboard.</p>
+
+      <form id="ipv4Form" class="network-section">
+        <h3>Dirección IPv4</h3>
+        <label>Conexión activa<select id="networkConnection" required></select></label>
+        <label>Configuración
+          <select id="networkMethod">
+            <option value="auto">Automática (DHCP)</option>
+            <option value="manual">IP estática</option>
+          </select>
+        </label>
+        <div id="staticNetworkFields" hidden>
+          <div class="form-grid two">
+            <label>Dirección / prefijo<input id="networkAddress" placeholder="192.168.1.50/24"></label>
+            <label>Puerta de enlace<input id="networkGateway" placeholder="192.168.1.1"></label>
+          </div>
+          <label>Servidores DNS<input id="networkDns" placeholder="1.1.1.1, 8.8.8.8"></label>
+        </div>
+        <p class="form-error" id="networkError" role="alert"></p>
+        <div class="inline-actions"><button class="button primary" type="submit">Aplicar IPv4</button></div>
+      </form>
+
+      <form id="wifiForm" class="network-section">
+        <h3>Conectar Wi-Fi</h3>
+        <label>Interfaz Wi-Fi<select id="wifiDevice" required></select></label>
+        <div class="form-grid two">
+          <label>Nombre de red (SSID)<input id="wifiSsid" maxlength="32" required autocomplete="off"></label>
+          <label>Contraseña<input id="wifiPassword" type="password" minlength="8" maxlength="63" required autocomplete="new-password"></label>
+        </div>
+        <p class="form-error" id="wifiError" role="alert"></p>
+        <div class="inline-actions"><button class="button secondary" type="submit">Conectar Wi-Fi</button></div>
+      </form>
+    </div>
+  </dialog>
+
+  <div class="toast" id="toast" role="status"></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

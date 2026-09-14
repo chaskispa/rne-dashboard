@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+fail() {
+  printf 'Error: %s\n' "$1" >&2
+  exit 1
+}
+
+[[ "${EUID}" -eq 0 ]] || fail "Este helper requiere privilegios de root."
+command -v nmcli >/dev/null 2>&1 || fail "NetworkManager (nmcli) no está instalado."
+
+action="${1:-}"
+case "${action}" in
+  apply)
+    [[ $# -ge 3 ]] || fail "Argumentos incompletos."
+    uuid="$2"
+    method="$3"
+    [[ "${uuid}" =~ ^[a-fA-F0-9-]{8,64}$ ]] || fail "UUID inválido."
+    if [[ "${method}" == "auto" ]]; then
+      [[ $# -eq 3 ]] || fail "Argumentos inesperados."
+      nmcli connection modify uuid "${uuid}" \
+        ipv4.method auto ipv4.addresses "" ipv4.gateway "" ipv4.dns ""
+    elif [[ "${method}" == "manual" ]]; then
+      [[ $# -eq 6 ]] || fail "Argumentos incompletos para IP estática."
+      address="$4"
+      gateway="$5"
+      dns="$6"
+      [[ "${address}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}/([0-9]|[12][0-9]|3[0-2])$ ]] || fail "Dirección o prefijo inválido."
+      [[ "${gateway}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || fail "Puerta de enlace inválida."
+      [[ -z "${dns}" || "${dns}" =~ ^[0-9.,]+$ ]] || fail "DNS inválido."
+      nmcli connection modify uuid "${uuid}" \
+        ipv4.method manual ipv4.addresses "${address}" ipv4.gateway "${gateway}" ipv4.dns "${dns}"
+    else
+      fail "Método IPv4 inválido."
+    fi
+    nmcli connection up uuid "${uuid}"
+    ;;
+  wifi)
+    [[ $# -eq 3 ]] || fail "Argumentos Wi-Fi incompletos."
+    device="$2"
+    ssid="$3"
+    IFS= read -r password || fail "No se recibió la contraseña Wi-Fi."
+    [[ "${device}" =~ ^[a-zA-Z0-9_.:-]{1,32}$ ]] || fail "Interfaz Wi-Fi inválida."
+    [[ -n "${ssid}" && "${ssid}" != -* && ${#ssid} -le 32 ]] || fail "SSID inválido."
+    [[ ${#password} -ge 8 && ${#password} -le 63 ]] || fail "Contraseña Wi-Fi inválida."
+    [[ "${ssid}" != *$'\n'* && "${ssid}" != *$'\r'* ]] || fail "SSID inválido."
+    [[ "${password}" != *$'\n'* && "${password}" != *$'\r'* ]] || fail "Contraseña Wi-Fi inválida."
+    password_file="$(mktemp)"
+    trap 'rm -f "${password_file}"' EXIT
+    chmod 0600 "${password_file}"
+    printf '802-11-wireless-security.psk:%s\n' "${password}" > "${password_file}"
+    profile="rne-dashboard-${device}"
+    nmcli connection delete id "${profile}" >/dev/null 2>&1 || true
+    nmcli connection add type wifi ifname "${device}" con-name "${profile}" ssid "${ssid}"
+    nmcli connection modify id "${profile}" wifi-sec.key-mgmt wpa-psk
+    nmcli connection up id "${profile}" ifname "${device}" passwd-file "${password_file}"
+    ;;
+  *)
+    fail "Acción no permitida."
+    ;;
+esac
