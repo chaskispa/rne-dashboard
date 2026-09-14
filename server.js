@@ -31,6 +31,7 @@ const API_BASE_URL = process.env.NODE_ENV === 'test' && process.env.RNE_TEST_API
 const CATEGORIES = ['hospitalario', 'tramites', 'transporte', 'vivienda', 'otro'];
 const SOURCE_TYPES = ['total', ...CATEGORIES, 'latest_wait', 'latest_testimony', 'custom'];
 const DISPLAY_UNITS = ['auto', 'minutes', 'hours', 'days', 'months', 'years'];
+const DISPLAY_MODES = ['both', 'time', 'label'];
 
 const defaultConfig = {
   panels: []
@@ -77,7 +78,10 @@ function validatePanel(candidate, existing = {}) {
   panel.source = String(panel.source || 'total');
   panel.template = String(panel.template || '').trim().slice(0, 240);
   panel.unit = DISPLAY_UNITS.includes(panel.unit) ? panel.unit : 'auto';
-  panel.showLabel = panel.showLabel !== false;
+  panel.displayMode = DISPLAY_MODES.includes(panel.displayMode)
+    ? panel.displayMode
+    : panel.showLabel === false ? 'time' : 'both';
+  delete panel.showLabel;
   panel.enabled = panel.enabled !== false;
   if (!panel.name) throw new Error('El panel necesita un nombre.');
   if (!isIpv4OrHostname(panel.host)) throw new Error('La dirección del panel no es válida.');
@@ -275,8 +279,15 @@ function renderPanelMessage(panel, data) {
   const minutes = timedPanelValue(panel, context);
   let rendered;
   if (minutes !== undefined) {
-    const duration = formatDuration(minutes, panel.unit);
-    rendered = `${panel.showLabel ? `${timedPanelLabel(panel, context)} ` : ''}${duration.value} ${duration.unit}`;
+    const label = timedPanelLabel(panel, context);
+    if (panel.displayMode === 'label') {
+      rendered = label;
+    } else {
+      const duration = formatDuration(minutes, panel.unit);
+      rendered = panel.displayMode === 'time'
+        ? `${duration.value} ${duration.unit}`
+        : `${label} ${duration.value} ${duration.unit}`;
+    }
   } else if (panel.source === 'latest_testimony') {
     rendered = context.latest_testimony;
   } else {

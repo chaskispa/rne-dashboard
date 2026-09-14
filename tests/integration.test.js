@@ -62,10 +62,13 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
   await writeFile(path.join(dataDir, 'config.json'), JSON.stringify({
     panels: [{
       id: 'test-panel', name: 'Panel test', host: '127.0.0.1', port: udpPort,
-      source: 'total', template: '', unit: 'auto', showLabel: false, enabled: true
+      source: 'total', template: '', unit: 'auto', displayMode: 'time', enabled: true
     }, {
       id: 'test-panel-minutes', name: 'Panel minutes', host: '127.0.0.1', port: udpPort,
-      source: 'total', template: '', unit: 'minutes', showLabel: false, enabled: true
+      source: 'total', template: '', unit: 'minutes', displayMode: 'time', enabled: true
+    }, {
+      id: 'test-panel-label', name: 'Panel label', host: '127.0.0.1', port: udpPort,
+      source: 'tramites', template: '', unit: 'auto', displayMode: 'label', enabled: true
     }]
   }));
 
@@ -87,10 +90,10 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
   const match = await waitForOutput(child, /127\.0\.0\.1:(\d+)/);
   const dashboardPort = Number(match[1]);
 
-  for (let attempt = 0; attempt < 30 && udpMessages.length < 2; attempt += 1) {
+  for (let attempt = 0; attempt < 30 && udpMessages.length < 3; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  assert.deepEqual(udpMessages.sort(), ['2 DÍAS', '2835 MIN'].sort());
+  assert.deepEqual(udpMessages.sort(), ['2 DÍAS', '2835 MIN', 'TRÁMITES'].sort());
 
   const stateResponse = await fetch(`http://127.0.0.1:${dashboardPort}/api/state`);
   assert.equal(stateResponse.status, 200);
@@ -98,7 +101,7 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
   assert.equal(state.results.tiempo_total, 2835);
   assert.equal(state.health.status, 'ok');
   assert.equal(state.events.filter((event) => event.kind === 'api').length, 2);
-  assert.equal(state.events.filter((event) => event.kind === 'udp').length, 2);
+  assert.equal(state.events.filter((event) => event.kind === 'udp').length, 3);
 
   const protectedResponse = await fetch(`http://127.0.0.1:${dashboardPort}/api/network/ipv4`, {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}'

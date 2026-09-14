@@ -15,6 +15,7 @@ const timedSources = ['total', 'hospitalario', 'tramites', 'transporte', 'vivien
 const unitLabels = {
   auto: 'Unidad automática', minutes: 'Minutos', hours: 'Horas', days: 'Días', months: 'Meses', years: 'Años'
 };
+const displayModeLabels = { both: 'Etiqueta + tiempo', time: 'Solo tiempo', label: 'Solo etiqueta' };
 
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>'"]/g, (character) => ({
@@ -111,7 +112,7 @@ function renderPanels() {
       <div><p class="panel-name">${escapeHtml(panel.name)}</p><div class="panel-meta">${escapeHtml(panel.host)}:${panel.port}</div><div class="send-status"><i class="status-dot ${statusClass}"></i>${escapeHtml(statusText)}</div></div>
       <div class="route-source"><strong>${escapeHtml(sourceLabels[panel.source] || panel.source)}</strong>${escapeHtml(
         timedSources.includes(panel.source)
-          ? `${panel.showLabel === false ? 'Solo tiempo' : 'Con etiqueta'} · ${unitLabels[panel.unit || 'auto']}`
+          ? `${displayModeLabels[panel.displayMode || (panel.showLabel === false ? 'time' : 'both')]}${panel.displayMode === 'label' ? '' : ` · ${unitLabels[panel.unit || 'auto']}`}`
           : panel.source === 'custom' ? (panel.template || 'Plantilla personalizada') : 'Texto público'
       )}</div>
       <div class="panel-actions">
@@ -284,7 +285,7 @@ function openPanelDialog(panel = null) {
   $('#panelSource').value = panel?.source || 'total';
   $('#panelTemplate').value = panel?.template || '';
   $('#panelUnit').value = panel?.unit || 'auto';
-  $('#panelShowLabel').checked = panel?.showLabel !== false;
+  $('#panelDisplayMode').value = panel?.displayMode || (panel?.showLabel === false ? 'time' : 'both');
   $('#panelEnabled').checked = panel?.enabled !== false;
   updatePanelFormatFields();
   $('#panelError').textContent = '';
@@ -294,12 +295,15 @@ function openPanelDialog(panel = null) {
 
 function updatePanelFormatFields() {
   const source = $('#panelSource').value;
-  $('#timeFormatFields').hidden = !timedSources.includes(source);
+  const isTimed = timedSources.includes(source);
+  $('#timeFormatFields').hidden = !isTimed;
+  $('#unitField').hidden = isTimed && $('#panelDisplayMode').value === 'label';
   $('#templateField').hidden = source !== 'custom';
 }
 
 $('#addPanelButton').addEventListener('click', () => openPanelDialog());
 $('#panelSource').addEventListener('change', updatePanelFormatFields);
+$('#panelDisplayMode').addEventListener('change', updatePanelFormatFields);
 $('#networkButton').addEventListener('click', openNetworkDialog);
 $$('[data-close-dialog]').forEach((button) => button.addEventListener('click', () => button.closest('dialog').close()));
 $$('.dialog').forEach((dialog) => dialog.addEventListener('click', (event) => {
@@ -313,7 +317,7 @@ $('#panelForm').addEventListener('submit', async (event) => {
     name: $('#panelName').value, host: $('#panelHost').value,
     port: Number($('#panelPort').value), source: $('#panelSource').value,
     template: $('#panelTemplate').value, unit: $('#panelUnit').value,
-    showLabel: $('#panelShowLabel').checked, enabled: $('#panelEnabled').checked
+    displayMode: $('#panelDisplayMode').value, enabled: $('#panelEnabled').checked
   };
   try {
     await request(id ? `/api/panels/${id}` : '/api/panels', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
@@ -464,7 +468,7 @@ function registerWebMcpTools() {
         totalMinutes: state.data.results?.tiempo_total ?? null,
         lastPollAt: state.data.lastPollAt,
         detectedLanDevices: state.data.lan?.devices?.length || 0,
-        panels: state.data.config.panels.map(({ id, name, host, port, source, unit, showLabel, enabled }) => ({ id, name, host, port, source, unit, showLabel, enabled }))
+        panels: state.data.config.panels.map(({ id, name, host, port, source, unit, displayMode, enabled }) => ({ id, name, host, port, source, unit, displayMode, enabled }))
       };
     }
   });

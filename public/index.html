@@ -149,7 +149,7 @@
         <label>Puerto UDP<input id="panelPort" type="number" min="1" max="65535" value="5000" required></label>
       </div>
       <div id="timeFormatFields" class="form-grid two">
-        <label>Unidad
+        <label id="unitField">Unidad
           <select id="panelUnit">
             <option value="auto">Automática</option>
             <option value="minutes">Minutos</option>
@@ -159,7 +159,13 @@
             <option value="years">Años (365 días)</option>
           </select>
         </label>
-        <label class="switch-row format-switch"><input id="panelShowLabel" type="checkbox" checked><span>Mostrar etiqueta o área</span></label>
+        <label>Contenido
+          <select id="panelDisplayMode">
+            <option value="both">Etiqueta + tiempo</option>
+            <option value="time">Solo tiempo</option>
+            <option value="label">Solo etiqueta</option>
+          </select>
+        </label>
       </div>
       <div id="templateField" hidden>
         <label>Plantilla personalizada

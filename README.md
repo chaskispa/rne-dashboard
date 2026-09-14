@@ -51,8 +51,9 @@ cada panel se puede elegir minutos, horas, días, meses, años o conversión
 automática. La unidad siempre se agrega al final del mensaje. Para la conversión
 se consideran 30 días por mes y 365 días por año.
 
-La opción **Mostrar etiqueta o área** permite elegir entre, por ejemplo,
-`TRÁMITES 8 MESES` y solamente `8 MESES`. Los mensajes para paneles usan
+La opción **Contenido** permite elegir entre **Etiqueta + tiempo**, **Solo
+tiempo** y **Solo etiqueta**. Por ejemplo, un panel puede recibir `TRÁMITES 8
+MESES`, `8 MESES` o solamente `TRÁMITES`. Los mensajes para paneles usan
 números enteros sin decimales ni separadores de miles.
 
 ## Plantillas personalizadas
