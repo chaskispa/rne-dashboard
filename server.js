@@ -126,6 +126,9 @@ function addEvent(event) {
 
 function publicState() {
   const activePanels = config.panels.filter((panel) => panel.enabled).length;
+  const publicEvents = events.map(({ id, at, kind, method, target, status, ok, panelId, panelName }) => ({
+    id, at, kind, method, target, status, ok, panelId, panelName
+  }));
   const publicResults = results ? {
     version: results.version,
     actualizado_en: results.actualizado_en,
@@ -145,7 +148,7 @@ function publicState() {
     health,
     results: publicResults,
     lan: lanScan,
-    events,
+    events: publicEvents,
     activePanels,
     panelRuntime: Object.fromEntries(panelRuntime)
   };

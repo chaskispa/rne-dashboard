@@ -123,14 +123,13 @@ h2 { font-size: 1.25rem; }
 .filter { border: 0; border-right: 1px solid var(--line); background: transparent; color: var(--muted); padding: 6px 8px; border-radius: 0; font: .68rem/1 "Chaski Mono", monospace; text-transform: uppercase; cursor: pointer; }
 .filter:last-child { border-right: 0; }
 .filter.active { background: var(--text); color: white; }
-.activity-list { overflow: auto; margin: 0 -8px; padding: 0 8px; }
+.activity-list { min-height: 0; max-height: 560px; overflow-y: auto; overflow-x: hidden; margin: 0 -8px; padding: 0 8px; }
 .event { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; gap: 10px; padding: 13px 0; border-top: 1px solid var(--line); }
 .event:first-child { border-top: 0; }
 .event-method { font: 800 .68rem/1 "Chaski Mono", monospace; color: var(--red); padding-top: 4px; }
 .event.udp .event-method { color: var(--text); }
 .event.system .event-method { color: var(--muted); }
-.event-target { font-size: .83rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.event-detail { margin-top: 5px; color: var(--muted); font-size: .72rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.event-target { min-width: 0; font-size: .83rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .event-result { text-align: right; }
 .event-code { font: 800 .72rem/1 "Chaski Mono", monospace; }
 .event-code.ok { color: var(--ok); }

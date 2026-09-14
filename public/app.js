@@ -174,13 +174,12 @@ function renderEvents() {
     list.innerHTML = '<div class="empty"><strong>Sin actividad todavía</strong>Las consultas y envíos aparecerán aquí.</div>';
     return;
   }
-  list.innerHTML = events.slice(0, 100).map((event) => {
-    const result = event.kind === 'udp' ? (event.ok ? 'SENT' : 'ERROR')
+  list.innerHTML = events.slice(0, 40).map((event) => {
+    const result = event.kind === 'udp' ? (event.ok ? 'ENVIADO' : 'ERROR')
       : event.kind === 'api' ? (event.status || 'ERROR') : 'OK';
-    const detailParts = [event.durationMs != null ? `${event.durationMs} ms` : '', event.bytes != null ? `${event.bytes} B` : '', event.message || event.error || ''].filter(Boolean);
     return `<article class="event ${event.kind}">
       <span class="event-method">${escapeHtml(event.method)}</span>
-      <div><div class="event-target" title="${escapeHtml(event.target)}">${escapeHtml(event.panelName || event.target)}</div><div class="event-detail" title="${escapeHtml(detailParts.join(' · '))}">${escapeHtml(detailParts.join(' · '))}</div></div>
+      <div class="event-target" title="${escapeHtml(event.target)}">${escapeHtml(event.panelName || event.target)}</div>
       <div class="event-result"><div class="event-code ${event.ok ? 'ok' : 'error'}">${escapeHtml(result)}</div><div class="event-time">${formatTime(event.at, true)}</div></div>
     </article>`;
   }).join('');
