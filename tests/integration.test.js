@@ -63,6 +63,9 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
     panels: [{
       id: 'test-panel', name: 'Panel test', host: '127.0.0.1', port: udpPort,
       source: 'total', template: '', unit: 'auto', showLabel: false, enabled: true
+    }, {
+      id: 'test-panel-minutes', name: 'Panel minutes', host: '127.0.0.1', port: udpPort,
+      source: 'total', template: '', unit: 'minutes', showLabel: false, enabled: true
     }]
   }));
 
@@ -84,10 +87,10 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
   const match = await waitForOutput(child, /127\.0\.0\.1:(\d+)/);
   const dashboardPort = Number(match[1]);
 
-  for (let attempt = 0; attempt < 30 && !udpMessages.length; attempt += 1) {
+  for (let attempt = 0; attempt < 30 && udpMessages.length < 2; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  assert.deepEqual(udpMessages, ['2 DÍAS']);
+  assert.deepEqual(udpMessages.sort(), ['2 DÍAS', '2835 MIN'].sort());
 
   const stateResponse = await fetch(`http://127.0.0.1:${dashboardPort}/api/state`);
   assert.equal(stateResponse.status, 200);
@@ -95,7 +98,7 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
   assert.equal(state.results.tiempo_total, 2835);
   assert.equal(state.health.status, 'ok');
   assert.equal(state.events.filter((event) => event.kind === 'api').length, 2);
-  assert.equal(state.events.filter((event) => event.kind === 'udp').length, 1);
+  assert.equal(state.events.filter((event) => event.kind === 'udp').length, 2);
 
   const protectedResponse = await fetch(`http://127.0.0.1:${dashboardPort}/api/network/ipv4`, {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}'

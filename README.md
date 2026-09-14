@@ -52,7 +52,8 @@ automática. La unidad siempre se agrega al final del mensaje. Para la conversi�
 se consideran 30 días por mes y 365 días por año.
 
 La opción **Mostrar etiqueta o área** permite elegir entre, por ejemplo,
-`TRÁMITES 8,4 MESES` y solamente `8,4 MESES`.
+`TRÁMITES 8 MESES` y solamente `8 MESES`. Los mensajes para paneles usan
+números enteros sin decimales ni separadores de miles.
 
 ## Plantillas personalizadas
 
