@@ -3,16 +3,17 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#101512">
+  <meta name="theme-color" content="#ff000d">
   <meta name="description" content="Monitoreo y enrutamiento de datos RNE hacia paneles LED por UDP.">
-  <title>RNE · Centro de control</title>
+  <title>CHASKI · Control RNE</title>
+  <link rel="icon" href="/assets/chaski-mark.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="/" aria-label="RNE, centro de control">
-      <span class="brand-mark" aria-hidden="true">RNE</span>
-      <span>Centro de control</span>
+    <a class="brand" href="/" aria-label="Chaski, centro de control RNE">
+      <img class="brand-logo" src="/assets/chaski-mark.svg" alt="" width="38" height="38">
+      <span class="brand-copy"><strong>CHASKI</strong><span>Control RNE</span></span>
     </a>
     <div class="topbar-actions">
       <div class="live-state" id="liveState"><span class="pulse"></span><span>Conectando</span></div>
@@ -25,7 +26,7 @@
     <section class="summary" aria-labelledby="summaryTitle">
       <div class="summary-heading">
         <div>
-          <p class="eyebrow">REGISTRO NACIONAL DE ESPERA</p>
+          <p class="eyebrow">[RNE] REGISTRO NACIONAL DE ESPERA</p>
           <h1 id="summaryTitle">Operación en tiempo real</h1>
         </div>
         <p class="cycle" id="cycleLabel">Ciclo automático cada 30 segundos</p>
@@ -59,7 +60,7 @@
         <section class="panel-card" aria-labelledby="routingTitle">
           <div class="section-head">
             <div>
-              <p class="eyebrow">SALIDAS UDP</p>
+              <p class="eyebrow">[01] SALIDAS UDP</p>
               <h2 id="routingTitle">Enrutamiento de paneles</h2>
             </div>
             <button class="button secondary" id="addPanelButton" type="button">+ Agregar panel</button>
@@ -70,7 +71,7 @@
         <section class="panel-card" aria-labelledby="lanTitle">
           <div class="section-head">
             <div>
-              <p class="eyebrow">MONITOR LAN</p>
+              <p class="eyebrow">[02] MONITOR LAN</p>
               <h2 id="lanTitle">Dispositivos detectados <span class="title-count" id="lanCount">0</span></h2>
             </div>
             <div class="section-actions">
@@ -91,7 +92,7 @@
         <section class="panel-card" aria-labelledby="areasTitle">
           <div class="section-head compact">
             <div>
-              <p class="eyebrow">DISTRIBUCIÓN</p>
+              <p class="eyebrow">[03] DISTRIBUCIÓN</p>
               <h2 id="areasTitle">Tiempo por área</h2>
             </div>
             <span class="timestamp" id="dataTimestamp">Sin datos</span>
@@ -103,7 +104,7 @@
       <aside class="activity panel-card" aria-labelledby="activityTitle">
         <div class="section-head compact">
           <div>
-            <p class="eyebrow">TRÁFICO</p>
+            <p class="eyebrow">[LOG] TRÁFICO</p>
             <h2 id="activityTitle">Actividad</h2>
           </div>
           <div class="traffic-filters" role="group" aria-label="Filtrar actividad">
@@ -121,7 +122,7 @@
     <form id="panelForm" method="dialog">
       <div class="dialog-head">
         <div>
-          <p class="eyebrow">RUTA UDP</p>
+          <p class="eyebrow">[RUTA UDP]</p>
           <h2 id="panelDialogTitle">Agregar panel</h2>
         </div>
         <button class="icon-button" value="cancel" aria-label="Cerrar" type="button" data-close-dialog>×</button>
@@ -164,7 +165,7 @@
     <form id="testForm" method="dialog">
       <div class="dialog-head">
         <div>
-          <p class="eyebrow">ENVÍO DIRECTO</p>
+          <p class="eyebrow">[ENVÍO DIRECTO]</p>
           <h2>Probar panel</h2>
         </div>
         <button class="icon-button" value="cancel" aria-label="Cerrar" type="button" data-close-dialog>×</button>
@@ -184,7 +185,7 @@
     <div class="dialog-body">
       <div class="dialog-head">
         <div>
-          <p class="eyebrow">NETWORKMANAGER</p>
+          <p class="eyebrow">[NETWORKMANAGER]</p>
           <h2>Red de la Raspberry</h2>
         </div>
         <button class="icon-button" aria-label="Cerrar" type="button" data-close-dialog>×</button>

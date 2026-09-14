@@ -104,5 +104,14 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
 
   const pageResponse = await fetch(`http://127.0.0.1:${dashboardPort}/`);
   assert.equal(pageResponse.status, 200);
-  assert.match(await pageResponse.text(), /Centro de control/);
+  assert.match(await pageResponse.text(), /CHASKI · Control RNE/);
+
+  const logoResponse = await fetch(`http://127.0.0.1:${dashboardPort}/assets/chaski-mark.svg`);
+  assert.equal(logoResponse.status, 200);
+  assert.match(logoResponse.headers.get('content-type'), /image\/svg\+xml/);
+
+  const fontResponse = await fetch(`http://127.0.0.1:${dashboardPort}/assets/fonts/geist-sans.woff`);
+  assert.equal(fontResponse.status, 200);
+  assert.equal(fontResponse.headers.get('content-type'), 'font/woff');
+  assert.ok((await fontResponse.arrayBuffer()).byteLength > 60_000);
 });

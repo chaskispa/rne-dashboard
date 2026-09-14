@@ -105,3 +105,10 @@ horizontal del controlador (`96×16`, `192×16`, etc.), mientras los mapas RNE
 son `16×96` y `96×96`. Por eso esta versión no los reenvía automáticamente: se
 necesita definir primero una transformación visual (rotación, recorte o
 segmentación) y enviarla por HTTP, no por UDP.
+
+## Identidad visual
+
+El dashboard utiliza el logo oficial, la paleta roja/gris y las tipografías
+Geist Sans/Mono empleadas por [CHASKI](https://chsk.net). Los recursos se
+guardan localmente en `public/assets` para que la interfaz funcione sin depender
+de Internet después de instalarla.
