@@ -1,9 +1,11 @@
 import dgram from 'node:dgram';
+import { promises as dns } from 'node:dns';
 import { execFile, spawn } from 'node:child_process';
 import { createReadStream } from 'node:fs';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import { isIP } from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
@@ -16,6 +18,7 @@ const configPath = path.join(dataDir, 'config.json');
 const host = process.env.HOST || '0.0.0.0';
 const port = Number(process.env.PORT || 4173);
 const POLL_INTERVAL_MS = 30_000;
+const LAN_SCAN_INTERVAL_MS = 60_000;
 const MAX_EVENTS = 400;
 const MAX_BODY_BYTES = 32 * 1024;
 const execFileAsync = promisify(execFile);
@@ -39,8 +42,10 @@ let lastPollAt = null;
 let nextPollAt = null;
 let polling = false;
 let timer = null;
+let lanTimer = null;
 let events = [];
 let adminToken = '';
+let lanScan = { available: null, scanning: false, lastScanAt: null, devices: [], error: null };
 const panelRuntime = new Map();
 const sseClients = new Set();
 
@@ -139,6 +144,7 @@ function publicState() {
     polling,
     health,
     results: publicResults,
+    lan: lanScan,
     events,
     activePanels,
     panelRuntime: Object.fromEntries(panelRuntime)
@@ -332,8 +338,12 @@ async function getNetworkState() {
     }).filter(({ type }) => ['ethernet', 'wifi'].includes(type));
 
     const devices = await Promise.all(baseDevices.map(async (device) => {
-      if (!device.connection) return { ...device, uuid: '', method: '', addresses: [], gateway: '', dns: [] };
       const field = async (args) => (await runNmcli(args)).stdout.trim();
+      let hardwareAddress = '';
+      try {
+        hardwareAddress = await field(['-g', 'GENERAL.HWADDR', 'device', 'show', device.device]);
+      } catch {}
+      if (!device.connection) return { ...device, hardwareAddress, uuid: '', method: '', addresses: [], gateway: '', dns: [] };
       try {
         const uuid = await field(['-g', 'GENERAL.CON-UUID', 'device', 'show', device.device]);
         const [method, addresses, gateway, dns] = await Promise.all([
@@ -343,13 +353,13 @@ async function getNetworkState() {
           field(['-g', 'IP4.DNS', 'device', 'show', device.device])
         ]);
         return {
-          ...device, uuid, method,
+          ...device, hardwareAddress, uuid, method,
           addresses: addresses.split('\n').filter(Boolean),
           gateway: gateway.split('\n')[0] || '',
           dns: dns.split('\n').filter(Boolean)
         };
       } catch {
-        return { ...device, uuid: '', method: '', addresses: [], gateway: '', dns: [] };
+        return { ...device, hardwareAddress, uuid: '', method: '', addresses: [], gateway: '', dns: [] };
       }
     }));
     return { available: true, adminKeyConfigured: Boolean(adminToken), devices };
@@ -360,6 +370,102 @@ async function getNetworkState() {
       devices: [],
       error: error.code === 'ENOENT' ? 'NetworkManager (nmcli) no está instalado.' : error.message
     };
+  }
+}
+
+function parseArpScan(output, interfaceName) {
+  return output.split('\n').flatMap((line) => {
+    const match = line.match(/^(\d{1,3}(?:\.\d{1,3}){3})\s+([0-9a-f]{2}(?::[0-9a-f]{2}){5})\s*(.*)$/i);
+    if (!match) return [];
+    return [{
+      ip: match[1], mac: match[2].toUpperCase(), vendor: match[3].trim() || 'Fabricante desconocido',
+      hostname: '', interface: interfaceName, local: false
+    }];
+  });
+}
+
+async function mapWithLimit(items, limit, mapper) {
+  const output = new Array(items.length);
+  let cursor = 0;
+  async function worker() {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      output[index] = await mapper(items[index], index);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return output;
+}
+
+async function reverseHostname(ip) {
+  try {
+    const names = await Promise.race([
+      dns.reverse(ip),
+      new Promise((resolve) => setTimeout(() => resolve([]), 1200))
+    ]);
+    return names[0]?.replace(/\.$/, '') || '';
+  } catch {
+    return '';
+  }
+}
+
+async function scanLan() {
+  if (lanScan.scanning) return;
+  const started = performance.now();
+  lanScan = { ...lanScan, scanning: true, error: null };
+  broadcast();
+  try {
+    const network = await getNetworkState();
+    if (!network.available) throw new Error(network.error || 'NetworkManager no está disponible.');
+    const interfaces = network.devices.filter((device) => device.connection && ['ethernet', 'wifi'].includes(device.type));
+    if (!interfaces.length) throw new Error('No hay interfaces LAN activas para escanear.');
+
+    const scans = await Promise.allSettled(interfaces.map(async (device) => {
+      const { stdout } = await runNetworkHelper(['scan', device.device]);
+      return parseArpScan(stdout, device.device);
+    }));
+    if (!scans.some((result) => result.status === 'fulfilled')) {
+      throw scans[0]?.reason || new Error('No fue posible escanear las interfaces activas.');
+    }
+    const discovered = scans.flatMap((result) => result.status === 'fulfilled' ? result.value : []);
+    for (const networkDevice of interfaces) {
+      for (const address of networkDevice.addresses || []) {
+        const ip = address.split('/')[0];
+        if (isIP(ip) === 4) {
+          discovered.push({
+            ip, mac: networkDevice.hardwareAddress?.toUpperCase() || '', vendor: 'Raspberry Pi local',
+            hostname: os.hostname(), interface: networkDevice.device, local: true
+          });
+        }
+      }
+    }
+
+    const unique = [...new Map(discovered.map((device) => [device.mac || device.ip, device])).values()]
+      .sort((a, b) => a.ip.localeCompare(b.ip, undefined, { numeric: true }));
+    const devices = await mapWithLimit(unique, 12, async (device) => ({
+      ...device,
+      hostname: device.hostname || await reverseHostname(device.ip)
+    }));
+    lanScan = {
+      available: true, scanning: false, lastScanAt: new Date().toISOString(), devices, error: null
+    };
+    addEvent({
+      kind: 'system', method: 'LAN', target: 'Escaneo de red', ok: true,
+      durationMs: Math.round(performance.now() - started), message: `${devices.length} dispositivos detectados`
+    });
+  } catch (error) {
+    lanScan = {
+      ...lanScan, available: false, scanning: false, lastScanAt: new Date().toISOString(), error: error.message
+    };
+    addEvent({
+      kind: 'system', method: 'LAN', target: 'Escaneo de red', ok: false,
+      durationMs: Math.round(performance.now() - started), error: error.message
+    });
+  } finally {
+    clearTimeout(lanTimer);
+    lanTimer = setTimeout(scanLan, LAN_SCAN_INTERVAL_MS);
+    broadcast();
   }
 }
 
@@ -408,6 +514,11 @@ async function handleApi(request, reply, url) {
 
   if (request.method === 'GET' && url.pathname === '/api/network') {
     return json(reply, 200, await getNetworkState());
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/lan/scan') {
+    if (!lanScan.scanning) void scanLan();
+    return json(reply, 202, { ok: true, scanning: true });
   }
 
   if (request.method === 'GET' && url.pathname === '/api/events') {
@@ -483,6 +594,7 @@ async function handleApi(request, reply, url) {
       args.push(`${address}/${prefix}`, gateway, dns);
     }
     await runNetworkHelper(args);
+    setTimeout(scanLan, 5_000);
     addEvent({ kind: 'system', method: 'NETWORK', target: 'Configuración IPv4', ok: true, message: method === 'auto' ? 'DHCP aplicado' : 'IP estática aplicada' });
     return json(reply, 200, { ok: true, message: 'Configuración aplicada. La conexión puede tardar unos segundos en regresar.' });
   }
@@ -497,6 +609,7 @@ async function handleApi(request, reply, url) {
     if (!ssid || Array.from(ssid).length > 32 || ssid.startsWith('-') || /[\r\n\0]/.test(ssid)) throw new Error('El nombre de la red Wi-Fi no es válido.');
     if (password.length < 8 || password.length > 63 || /[\r\n\0]/.test(password)) throw new Error('La contraseña Wi-Fi debe tener entre 8 y 63 caracteres.');
     await runNetworkHelper(['wifi', device, ssid], `${password}\n`);
+    setTimeout(scanLan, 5_000);
     addEvent({ kind: 'system', method: 'NETWORK', target: device, ok: true, message: `Wi-Fi: ${ssid}` });
     return json(reply, 200, { ok: true, message: 'Conexión Wi-Fi iniciada. La dirección del dashboard puede cambiar.' });
   }
@@ -544,10 +657,12 @@ server.listen(port, host, () => {
   const address = server.address();
   console.log(`RNE dashboard listening on http://${host}:${address.port}`);
   void poll();
+  if (process.env.NODE_ENV !== 'test') void scanLan();
 });
 
 function shutdown() {
   clearTimeout(timer);
+  clearTimeout(lanTimer);
   for (const client of sseClients) client.end();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(1), 5_000).unref();

@@ -11,6 +11,13 @@ command -v nmcli >/dev/null 2>&1 || fail "NetworkManager (nmcli) no está instal
 
 action="${1:-}"
 case "${action}" in
+  scan)
+    [[ $# -eq 2 ]] || fail "Interfaz de escaneo incompleta."
+    device="$2"
+    [[ "${device}" =~ ^[a-zA-Z0-9_.:-]{1,32}$ ]] || fail "Interfaz de red inválida."
+    command -v arp-scan >/dev/null 2>&1 || fail "arp-scan no está instalado."
+    timeout 20s arp-scan --interface="${device}" --localnet --plain --ignoredups --retry=2
+    ;;
   apply)
     [[ $# -ge 3 ]] || fail "Argumentos incompletos."
     uuid="$2"

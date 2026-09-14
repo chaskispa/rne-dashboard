@@ -125,6 +125,48 @@ function renderAreas() {
   }).join('');
 }
 
+function renderLan() {
+  const lan = state.data.lan || { devices: [] };
+  const devices = lan.devices || [];
+  const button = $('#scanLanButton');
+  button.disabled = Boolean(lan.scanning);
+  button.textContent = lan.scanning ? 'Escaneando…' : 'Escanear red';
+  $('#lanCount').textContent = devices.length;
+  $('#lanTimestamp').textContent = lan.scanning
+    ? 'Escaneo en curso'
+    : lan.lastScanAt ? `Escaneado ${formatTime(lan.lastScanAt, true)}` : 'Sin escanear';
+
+  const table = $('.lan-table-wrap');
+  const empty = $('#lanEmpty');
+  if (!devices.length) {
+    table.hidden = true;
+    empty.hidden = false;
+    const title = lan.scanning ? 'Buscando dispositivos' : lan.available === false ? 'Escaneo no disponible' : 'Todavía no hay resultados';
+    const detail = lan.error || (lan.scanning ? 'Esto puede tardar algunos segundos.' : 'Inicia un escaneo para descubrir la red local.');
+    empty.innerHTML = `<strong>${escapeHtml(title)}</strong>${escapeHtml(detail)}`;
+    return;
+  }
+
+  table.hidden = false;
+  empty.hidden = true;
+  $('#lanDeviceList').innerHTML = devices.map((device) => {
+    const panel = state.data.config.panels.find((item) => (
+      item.host.toLowerCase() === device.ip.toLowerCase()
+      || (device.hostname && item.host.toLowerCase() === device.hostname.toLowerCase())
+    ));
+    const name = device.hostname || panel?.name || 'Dispositivo sin nombre';
+    const badge = panel ? '<span class="device-badge">Panel LED</span>'
+      : device.local ? '<span class="device-badge local">Esta Raspberry</span>' : '';
+    return `<tr>
+      <td><div class="device-identity"><span class="device-symbol" aria-hidden="true">${panel ? 'LED' : device.local ? 'PI' : 'LAN'}</span><div><strong title="${escapeHtml(name)}">${escapeHtml(name)}</strong>${badge}</div></div></td>
+      <td><code>${escapeHtml(device.ip)}</code></td>
+      <td><code>${escapeHtml(device.mac || '—')}</code></td>
+      <td title="${escapeHtml(device.vendor)}">${escapeHtml(device.vendor)}</td>
+      <td>${escapeHtml(device.interface)}</td>
+    </tr>`;
+  }).join('');
+}
+
 function renderEvents() {
   const events = state.data.events.filter((event) => state.filter === 'all' || event.kind === state.filter);
   const list = $('#activityList');
@@ -210,6 +252,7 @@ function render() {
   if (!state.data) return;
   renderSummary();
   renderPanels();
+  renderLan();
   renderAreas();
   renderEvents();
   updateCountdown();
@@ -361,6 +404,19 @@ $('#syncButton').addEventListener('click', async () => {
   setTimeout(() => { button.disabled = false; }, 1000);
 });
 
+$('#scanLanButton').addEventListener('click', async () => {
+  const button = $('#scanLanButton');
+  button.disabled = true;
+  try {
+    await request('/api/lan/scan', { method: 'POST' });
+    toast('Escaneo LAN iniciado');
+    await refresh();
+  } catch (error) {
+    toast(error.message);
+    button.disabled = false;
+  }
+});
+
 $$('.filter').forEach((button) => button.addEventListener('click', () => {
   state.filter = button.dataset.filter;
   $$('.filter').forEach((item) => item.classList.toggle('active', item === button));
@@ -389,6 +445,7 @@ function registerWebMcpTools() {
         apiStatus: state.data.health?.status || 'unknown',
         totalMinutes: state.data.results?.tiempo_total ?? null,
         lastPollAt: state.data.lastPollAt,
+        detectedLanDevices: state.data.lan?.devices?.length || 0,
         panels: state.data.config.panels.map(({ id, name, host, port, source, enabled }) => ({ id, name, host, port, source, enabled }))
       };
     }

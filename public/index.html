@@ -67,6 +67,27 @@
           <div id="panelList" class="panel-list"></div>
         </section>
 
+        <section class="panel-card" aria-labelledby="lanTitle">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">MONITOR LAN</p>
+              <h2 id="lanTitle">Dispositivos detectados <span class="title-count" id="lanCount">0</span></h2>
+            </div>
+            <div class="section-actions">
+              <span class="timestamp" id="lanTimestamp">Sin escanear</span>
+              <button class="button secondary" id="scanLanButton" type="button">Escanear red</button>
+            </div>
+          </div>
+          <p class="section-note">Equipos visibles en los segmentos Ethernet y Wi-Fi de esta Raspberry Pi. Los dispositivos dormidos o aislados por el router pueden no aparecer.</p>
+          <div class="lan-table-wrap">
+            <table class="lan-table">
+              <thead><tr><th>Dispositivo</th><th>Dirección IP</th><th>Dirección MAC</th><th>Fabricante</th><th>Interfaz</th></tr></thead>
+              <tbody id="lanDeviceList"></tbody>
+            </table>
+          </div>
+          <div id="lanEmpty" class="empty" hidden></div>
+        </section>
+
         <section class="panel-card" aria-labelledby="areasTitle">
           <div class="section-head compact">
             <div>

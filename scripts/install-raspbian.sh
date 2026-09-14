@@ -106,6 +106,12 @@ else
 fi
 NODE_BIN="$(command -v node)"
 
+if ! command -v arp-scan >/dev/null 2>&1; then
+  info "Instalando el detector de dispositivos LAN"
+  apt-get update
+  DEBIAN_FRONTEND=noninteractive apt-get install -y arp-scan
+fi
+
 info "Instalando archivos del dashboard"
 if ! getent group "${SERVICE_USER}" >/dev/null; then
   groupadd --system "${SERVICE_USER}"

@@ -13,6 +13,8 @@ envía texto a controladores `RGB_ETHERNET` mediante UDP.
 - Permite crear, editar, pausar, probar y eliminar rutas hacia paneles.
 - Permite consultar NetworkManager, configurar DHCP o una IP estática y
   conectar la Raspberry Pi a una red Wi-Fi protegida.
+- Detecta cada 60 segundos los equipos visibles en la LAN, intenta resolver sus
+  hostnames y muestra IP, MAC, fabricante e interfaz.
 - Puede asignar a cada panel el total, una categoría, la última espera, el
   último testimonio o una plantilla personalizada.
 - Guarda las rutas de paneles en `data/config.json` mediante escritura atómica.
@@ -65,6 +67,7 @@ sudo bash scripts/install-raspbian.sh
 El instalador:
 
 - instala Node.js 22 cuando no hay una versión compatible;
+- instala `arp-scan` para el monitor de dispositivos LAN;
 - copia la aplicación a `/opt/rne-dashboard`;
 - crea un usuario de sistema sin acceso interactivo;
 - guarda la configuración en `/var/lib/rne-dashboard`;
