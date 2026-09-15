@@ -6,7 +6,8 @@ envía texto a controladores `RGB_ETHERNET` mediante UDP.
 
 ## Qué hace
 
-- Consulta `GET /api/results.json` y `GET /health` cada 30 segundos.
+- Consulta `GET /api/results`, `GET /api/results/categories`,
+  `GET /api/results.json` y `GET /health` cada 30 segundos.
 - Muestra todas las solicitudes que este servicio realiza a la API. Mantiene
   en memoria las últimas 400 consultas, envíos UDP y
   cambios de configuración.
@@ -46,10 +47,12 @@ PORT=4173 HOST=0.0.0.0 RNE_DATA_DIR=./data npm start
 
 ## Formato de tiempo
 
-La API entrega todos los valores en minutos (`unidad_tiempo: "minutos"`). Para
-cada panel se puede elegir minutos, horas, días, meses, años o conversión
-automática. La unidad siempre se agrega al final del mensaje. Para la conversión
-se consideran 30 días por mes y 365 días por año.
+El dashboard toma los totales exactos en minutos de `/api/results` y
+`/api/results/categories`. Usa `/api/results.json` para las entradas y
+testimonios, pero no para sus acumulados redondeados. Internamente normaliza
+todo a minutos. Para cada panel se puede elegir minutos, horas, días, meses,
+años o conversión automática. La unidad siempre se agrega al final del mensaje.
+Para la conversión se consideran 30 días por mes y 365 días por año.
 
 La opción **Contenido** permite elegir entre **Etiqueta + tiempo**, **Solo
 tiempo** y **Solo etiqueta**. Por ejemplo, un panel puede recibir `TRÁMITES 8

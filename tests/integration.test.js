@@ -8,15 +8,30 @@ import path from 'node:path';
 import test from 'node:test';
 
 const fixture = {
-  version: 2,
+  version: 3,
   actualizado_en: '2026-08-29T16:52:26.964Z',
-  unidad_tiempo: 'minutos',
-  tiempo_total: 2835,
-  tiempo_por_area: { hospitalario: 0, tramites: 2835, transporte: 0, vivienda: 0, otro: 0 },
+  unidad_tiempo: 'meses',
+  tiempo_total: 0.1,
+  tiempo_por_area: { hospitalario: 0, tramites: 0.1, transporte: 0, vivienda: 0, otro: 0 },
   entradas: [{
     id: 'KHbkj9jtX0', fecha: '2026-08-29T16:52:26.964Z',
     region: 'Región Metropolitana de Santiago', comuna: 'Santiago',
     area: 'tramites', tiempo_minutos: 2835, testimonio: 'Esperé mucho.'
+  }]
+};
+
+const summaryFixture = {
+  total_submissions: 1,
+  total_wait_minutes: 2835,
+  average_wait_minutes: 2835,
+  median_wait_minutes: 2835,
+  updated_at: '2026-08-29T16:52:26.964Z'
+};
+
+const categoriesFixture = {
+  items: [{
+    category: 'tramites', count: 1, total_wait_minutes: 2835,
+    average_wait_minutes: 2835, percentage: 100
   }]
 };
 
@@ -50,9 +65,17 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
   const udpPort = await new Promise((resolve) => udp.bind(0, '127.0.0.1', () => resolve(udp.address().port)));
 
   const mockApi = http.createServer((request, reply) => {
-    const payload = request.url === '/health'
-      ? { status: 'ok', database: 'ok' }
-      : fixture;
+    const payload = {
+      '/api/results.json': fixture,
+      '/api/results': summaryFixture,
+      '/api/results/categories': categoriesFixture,
+      '/health': { status: 'ok', database: 'ok' }
+    }[request.url];
+    if (!payload) {
+      reply.writeHead(404);
+      reply.end();
+      return;
+    }
     reply.writeHead(200, { 'content-type': 'application/json' });
     reply.end(JSON.stringify(payload));
   });
@@ -106,8 +129,12 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
   assert.equal(stateResponse.status, 200);
   const state = await stateResponse.json();
   assert.equal(state.results.tiempo_total, 2835);
+  assert.equal(state.results.tiempo_por_area.tramites, 2835);
+  assert.equal(state.results.tiempo_por_area.hospitalario, 0);
+  assert.equal(state.results.unidad_tiempo, 'minutos');
+  assert.equal(state.results.version, 3);
   assert.equal(state.health.status, 'ok');
-  assert.equal(state.events.filter((event) => event.kind === 'api').length, 2);
+  assert.equal(state.events.filter((event) => event.kind === 'api').length, 4);
   assert.equal(state.events.filter((event) => event.kind === 'udp').length, 4);
   const coloredPanel = state.config.panels.find((panel) => panel.id === 'test-panel-colors');
   assert.equal(coloredPanel.labelColor, '00FF00');

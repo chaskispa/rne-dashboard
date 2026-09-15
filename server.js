@@ -203,6 +203,36 @@ async function fetchLogged(endpoint, type) {
   }
 }
 
+function exactMinuteValue(value, field) {
+  const minutes = Number(value);
+  if (!Number.isFinite(minutes) || minutes < 0) {
+    throw new Error(`La API devolvió un valor inválido para ${field}.`);
+  }
+  return minutes;
+}
+
+function normalizeApiResults(publicResults, summary, categories) {
+  const tiempoPorArea = Object.fromEntries(CATEGORIES.map((category) => [category, 0]));
+  if (!Array.isArray(categories?.items)) {
+    throw new Error('La API no devolvió el resumen por área.');
+  }
+  for (const item of categories.items) {
+    if (!CATEGORIES.includes(item?.category)) continue;
+    tiempoPorArea[item.category] = exactMinuteValue(
+      item.total_wait_minutes,
+      `tiempo_por_area.${item.category}`
+    );
+  }
+  return {
+    ...publicResults,
+    actualizado_en: summary?.updated_at || publicResults?.actualizado_en || null,
+    unidad_tiempo: 'minutos',
+    tiempo_total: exactMinuteValue(summary?.total_wait_minutes, 'tiempo_total'),
+    tiempo_por_area: tiempoPorArea,
+    entradas: Array.isArray(publicResults?.entradas) ? publicResults.entradas : []
+  };
+}
+
 function contextFromResults(data) {
   const latest = Array.isArray(data?.entradas) ? data.entradas.at(-1) : null;
   const area = data?.tiempo_por_area || {};
@@ -374,13 +404,30 @@ async function poll() {
   polling = true;
   nextPollAt = null;
   broadcast();
-  const [resultResponse, healthResponse] = await Promise.allSettled([
+  const [publicResultsResponse, summaryResponse, categoriesResponse, healthResponse] = await Promise.allSettled([
     fetchLogged('/api/results.json', 'results'),
+    fetchLogged('/api/results', 'summary'),
+    fetchLogged('/api/results/categories', 'categories'),
     fetchLogged('/health', 'health')
   ]);
-  if (resultResponse.status === 'fulfilled') {
-    results = resultResponse.value.parsed;
-    await sendAllPanels(results);
+  if (
+    publicResultsResponse.status === 'fulfilled'
+    && summaryResponse.status === 'fulfilled'
+    && categoriesResponse.status === 'fulfilled'
+  ) {
+    try {
+      results = normalizeApiResults(
+        publicResultsResponse.value.parsed,
+        summaryResponse.value.parsed,
+        categoriesResponse.value.parsed
+      );
+      await sendAllPanels(results);
+    } catch (error) {
+      addEvent({
+        kind: 'api', method: 'NORMALIZE', target: 'resultados', status: null,
+        ok: false, durationMs: 0, error: error.message
+      });
+    }
   }
   health = healthResponse.status === 'fulfilled'
     ? healthResponse.value.parsed
