@@ -38,14 +38,25 @@ const BITMAP_MAGIC = Buffer.from('RGBU');
 const BITMAP_CHUNK_SIZE = 1024;
 const BITMAP_CHUNK_COUNT = Math.ceil(BITMAP_FRAME_BYTES / BITMAP_CHUNK_SIZE);
 const BITMAP_RETRIES = 2;
-const BITMAP_CHUNK_DELAY_MS = 10;
+const requestedBitmapDelay = Number(process.env.RNE_BITMAP_CHUNK_DELAY_MS ?? 250);
+const BITMAP_CHUNK_DELAY_MS = Number.isFinite(requestedBitmapDelay) && requestedBitmapDelay >= 0
+  ? requestedBitmapDelay
+  : 250;
 const BITMAP_ACK_TIMEOUT_MS = 1_000;
 const SOURCE_TYPES = ['total', ...CATEGORIES, 'latest_wait', 'latest_testimony', BITMAP_SOURCE, 'custom'];
 const DISPLAY_UNITS = ['auto', 'minutes', 'hours', 'days', 'months', 'years'];
 const DISPLAY_MODES = ['both', 'time', 'label'];
 
 const defaultConfig = {
-  panels: []
+  bitmapPanelProvisioned: true,
+  panels: [{
+    id: 'gran-santiago-96x96',
+    name: 'Mapa Gran Santiago 96×96',
+    host: '192.168.100.23',
+    port: 5001,
+    source: BITMAP_SOURCE,
+    enabled: true
+  }]
 };
 
 let config = structuredClone(defaultConfig);
@@ -117,6 +128,19 @@ async function loadConfig() {
     config.panels = Array.isArray(saved.panels)
       ? saved.panels.map((panel) => validatePanel(panel, { id: panel.id || randomUUID() }))
       : [];
+    config.bitmapPanelProvisioned = saved.bitmapPanelProvisioned === true;
+    if (!config.bitmapPanelProvisioned) {
+      const alreadyConfigured = config.panels.some((panel) => (
+        panel.source === BITMAP_SOURCE
+        && panel.host === '192.168.100.23'
+        && panel.port === 5001
+      ));
+      if (!alreadyConfigured) {
+        config.panels.push(validatePanel(defaultConfig.panels[0], { id: defaultConfig.panels[0].id }));
+      }
+      config.bitmapPanelProvisioned = true;
+      await saveConfig();
+    }
   } catch (error) {
     if (error.code !== 'ENOENT') console.error('Could not load config:', error.message);
   }

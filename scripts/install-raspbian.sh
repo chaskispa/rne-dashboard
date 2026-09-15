@@ -124,12 +124,14 @@ install -d -o root -g root -m 0755 "${APP_DIR}"
 install -d -o "${SERVICE_USER}" -g "${SERVICE_USER}" -m 0750 "${DATA_DIR}"
 install -m 0644 "${SOURCE_DIR}/server.js" "${APP_DIR}/server.js"
 install -m 0644 "${SOURCE_DIR}/package.json" "${APP_DIR}/package.json"
+install -m 0755 "${SOURCE_DIR}/send_bitmap_udp.py" "${APP_DIR}/send_bitmap_udp.py"
 install -d -o root -g root -m 0755 "${APP_DIR}/public"
 find "${APP_DIR}/public" -mindepth 1 -maxdepth 1 -type f -delete
 cp -a "${SOURCE_DIR}/public/." "${APP_DIR}/public/"
 chown -R root:root "${APP_DIR}"
 find "${APP_DIR}" -type d -exec chmod 0755 {} +
 find "${APP_DIR}" -type f -exec chmod 0644 {} +
+chmod 0755 "${APP_DIR}/send_bitmap_udp.py"
 
 install -d -o root -g root -m 0755 "$(dirname "${NETWORK_HELPER}")"
 install -o root -g root -m 0755 "${SOURCE_DIR}/scripts/network-helper" "${NETWORK_HELPER}"

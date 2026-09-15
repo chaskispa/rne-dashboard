@@ -43,7 +43,11 @@ Variables opcionales:
 
 ```sh
 PORT=4173 HOST=0.0.0.0 RNE_DATA_DIR=./data npm start
+RNE_BITMAP_CHUNK_DELAY_MS=250 npm start
 ```
+
+`RNE_BITMAP_CHUNK_DELAY_MS` controla la pausa entre fragmentos del mapa y usa
+`250` ms por defecto para no saturar el receptor W5100S.
 
 ## Formato de tiempo
 
@@ -132,23 +136,33 @@ sudo systemctl restart rne-dashboard
 ## Mapas RGB565
 
 Para un controlador configurado como **18 paneles (3×6 serpentine, 96×96)**,
-crea una ruta y selecciona **Mapa Gran Santiago 96×96**. El puerto cambia a
-`5001` automáticamente. Cada 30 segundos el dashboard descarga directamente:
+el dashboard incluye una ruta para **Mapa Gran Santiago 96×96** en
+`192.168.100.23:5001`. También puede crearse o editarse desde la interfaz; al
+seleccionar esa fuente, el puerto cambia a `5001` automáticamente. Cada 30
+segundos el dashboard descarga directamente:
 
 ```text
 /api/results/maps/gran-santiago.rgb565
 ```
 
-El archivo ya contiene los 18.432 bytes RGB565 big-endian finales. El dashboard
-lo divide en 18 datagramas con cabecera `RGBU`, los envía en orden y espera la
-confirmación del controlador. Si no recibe confirmación, reintenta el cuadro
-completo una vez y registra el envío como error. **Reenviar** descarga y envía
-el mapa inmediatamente.
+El archivo ya contiene los 18.432 bytes RGB565 big-endian finales y se transmite
+sin rotar, redimensionar, transponer, serpentear ni reordenar píxeles. El Pico
+se encarga del mapeo físico. El dashboard divide el archivo en 18 datagramas con
+cabecera `RGBU`, espera 250 ms entre ellos, los envía en orden y espera la
+confirmación exacta del controlador. Si no la recibe, reintenta el cuadro
+completo con el mismo ID y registra el envío como error. **Reenviar** descarga
+y envía el mapa inmediatamente.
 
 La ruta de texto UDP `5000` continúa disponible para los demás tipos de panel.
-El script `send_bitmap_udp.py` puede usarse para pruebas manuales con imágenes
-locales, pero el servicio no necesita Python ni Pillow para reenviar el mapa de
-la API.
+El script `send_bitmap_udp.py` puede usarse para pruebas manuales con un archivo
+RGB565 ya preparado:
+
+```sh
+python3 send_bitmap_udp.py gran-santiago.rgb565
+```
+
+El servicio principal implementa el protocolo directamente y no necesita
+Python ni Pillow para reenviar el mapa de la API.
 
 ## Identidad visual
 

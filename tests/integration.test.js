@@ -69,6 +69,8 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
   let bitmapPayload = null;
   let bitmapFrameId = null;
   const bitmapChunks = new Map();
+  const bitmapAttempts = [];
+  let bitmapAcknowledged = false;
   const bitmapUdp = dgram.createSocket('udp4');
   bitmapUdp.on('message', (message, remote) => {
     if (message.length < 8 || message.subarray(0, 4).toString() !== 'RGBU') return;
@@ -80,14 +82,25 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
       bitmapFrameId = frameId;
       bitmapChunks.clear();
       bitmapPayload = null;
+      bitmapAttempts.length = 0;
     }
+    if (chunkIndex === 0) bitmapAttempts.push([]);
+    bitmapAttempts.at(-1)?.push({
+      frameId,
+      chunkIndex,
+      chunkCount,
+      payloadLength: message.length - 8
+    });
     bitmapChunks.set(chunkIndex, message.subarray(8));
     if (bitmapChunks.size === chunkCount) {
       bitmapPayload = Buffer.concat(Array.from({ length: chunkCount }, (_, index) => bitmapChunks.get(index)));
-      const acknowledgement = Buffer.concat([
-        Buffer.from('RGBU'), Buffer.from([frameId >> 8, frameId & 0xFF]), Buffer.from('OK')
-      ]);
-      bitmapUdp.send(acknowledgement, remote.port, remote.address);
+      if (bitmapAttempts.length >= 2 && bitmapAttempts.at(-1).length === chunkCount) {
+        const acknowledgement = Buffer.concat([
+          Buffer.from('RGBU'), Buffer.from([frameId >> 8, frameId & 0xFF]), Buffer.from('OK')
+        ]);
+        bitmapAcknowledged = true;
+        bitmapUdp.send(acknowledgement, remote.port, remote.address);
+      }
     }
   });
   const bitmapPort = await new Promise((resolve) => bitmapUdp.bind(0, '127.0.0.1', () => resolve(bitmapUdp.address().port)));
@@ -122,6 +135,7 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
 
   const dataDir = await mkdtemp(path.join(os.tmpdir(), 'rne-dashboard-test-'));
   await writeFile(path.join(dataDir, 'config.json'), JSON.stringify({
+    bitmapPanelProvisioned: true,
     panels: [{
       id: 'test-panel', name: 'Panel test', host: '127.0.0.1', port: udpPort,
       source: 'total', template: '', unit: 'auto', displayMode: 'time', enabled: true
@@ -146,7 +160,8 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
     cwd: path.resolve(import.meta.dirname, '..'),
     env: {
       ...process.env, NODE_ENV: 'test', RNE_TEST_API_BASE_URL: `http://127.0.0.1:${apiPort}`,
-      PORT: '0', HOST: '127.0.0.1', RNE_DATA_DIR: dataDir
+      PORT: '0', HOST: '127.0.0.1', RNE_DATA_DIR: dataDir,
+      RNE_BITMAP_CHUNK_DELAY_MS: '0'
     },
     stdio: ['ignore', 'pipe', 'pipe']
   });
@@ -161,7 +176,7 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
   const match = await waitForOutput(child, /127\.0\.0\.1:(\d+)/);
   const dashboardPort = Number(match[1]);
 
-  for (let attempt = 0; attempt < 60 && (udpMessages.length < 4 || !bitmapPayload); attempt += 1) {
+  for (let attempt = 0; attempt < 80 && (udpMessages.length < 4 || !bitmapAcknowledged); attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   assert.deepEqual(udpMessages.sort(), [
@@ -170,6 +185,13 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
   assert.ok(bitmapPayload);
   assert.equal(bitmapPayload.length, 96 * 96 * 2);
   assert.equal(Buffer.compare(bitmapPayload, bitmapFixture), 0);
+  assert.equal(bitmapAttempts.length, 2);
+  for (const attempt of bitmapAttempts) {
+    assert.deepEqual(attempt.map((chunk) => chunk.chunkIndex), Array.from({ length: 18 }, (_, index) => index));
+    assert.ok(attempt.every((chunk) => chunk.frameId === bitmapFrameId));
+    assert.ok(attempt.every((chunk) => chunk.chunkCount === 18));
+    assert.ok(attempt.every((chunk) => chunk.payloadLength > 0 && chunk.payloadLength <= 1024));
+  }
   await new Promise((resolve) => setTimeout(resolve, 50));
 
   const stateResponse = await fetch(`http://127.0.0.1:${dashboardPort}/api/state`);

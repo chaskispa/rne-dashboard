@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Send a 96x96 RGB565 bitmap to the special RGB Ethernet layout."""
+"""Send an unchanged 96x96 big-endian RGB565 frame over UDP."""
 
 import argparse
+import os
 import socket
 import time
-
-from PIL import Image
 
 
 WIDTH = 96
@@ -17,12 +16,15 @@ FRAME_BYTES = WIDTH * HEIGHT * 2
 CHUNK_COUNT = (FRAME_BYTES + CHUNK_SIZE - 1) // CHUNK_SIZE
 
 
-def rgb565_bytes(image):
-    output = bytearray()
-    for red, green, blue in image.getdata():
-        value = ((red & 0xF8) << 8) | ((green & 0xFC) << 3) | (blue >> 3)
-        output.extend((value >> 8, value & 0xFF))
-    return bytes(output)
+def environment_delay_ms():
+    try:
+        value = float(os.environ.get("RNE_BITMAP_CHUNK_DELAY_MS", "250"))
+        return value if value >= 0 else 250.0
+    except ValueError:
+        return 250.0
+
+
+DEFAULT_DELAY_MS = environment_delay_ms()
 
 
 def frame_packets(payload, frame_id):
@@ -41,20 +43,22 @@ def frame_packets(payload, frame_id):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("image", help="PNG, JPEG, or another Pillow image")
-    parser.add_argument("--host", required=True, help="Display IPv4 address")
+    parser.add_argument("bitmap", help="Raw 96x96 RGB565 big-endian file")
+    parser.add_argument("--host", default="192.168.100.23",
+                        help="Display IPv4 address")
     parser.add_argument("--port", type=int, default=PORT)
     parser.add_argument("--retries", type=int, default=2,
                         help="Complete-frame transmission attempts")
-    parser.add_argument("--delay", type=float, default=0.01,
-                        help="Seconds between UDP chunks")
+    parser.add_argument("--delay-ms", type=float, default=DEFAULT_DELAY_MS,
+                        help="Milliseconds between UDP chunks")
     args = parser.parse_args()
 
-    with Image.open(args.image) as source:
-        image = source.convert("RGB").resize(
-            (WIDTH, HEIGHT), Image.Resampling.LANCZOS
-        )
-    payload = rgb565_bytes(image)
+    with open(args.bitmap, "rb") as bitmap_file:
+        payload = bitmap_file.read()
+    if len(payload) != FRAME_BYTES:
+        raise ValueError("Expected {} RGB565 bytes, received {}".format(
+            FRAME_BYTES, len(payload)
+        ))
     frame_id = int(time.monotonic() * 1000) & 0xFFFF
     expected_ack = MAGIC + bytes((frame_id >> 8, frame_id & 0xFF)) + b"OK"
 
@@ -62,9 +66,10 @@ def main():
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as udp:
         udp.settimeout(1.0)
         for _ in range(max(1, args.retries)):
-            for packet in frame_packets(payload, frame_id):
+            for chunk_index, packet in enumerate(frame_packets(payload, frame_id)):
                 udp.sendto(packet, (args.host, args.port))
-                time.sleep(max(0, args.delay))
+                if chunk_index < CHUNK_COUNT - 1:
+                    time.sleep(max(0, args.delay_ms) / 1000.0)
             try:
                 response, _ = udp.recvfrom(32)
                 if response == expected_ack:
