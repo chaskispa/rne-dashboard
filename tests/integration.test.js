@@ -68,7 +68,12 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
       source: 'total', template: '', unit: 'minutes', displayMode: 'time', enabled: true
     }, {
       id: 'test-panel-label', name: 'Panel label', host: '127.0.0.1', port: udpPort,
-      source: 'tramites', template: '', unit: 'auto', displayMode: 'label', enabled: true
+      source: 'tramites', template: '', unit: 'auto', displayMode: 'label',
+      colorsEnabled: true, labelColor: '00ff00', enabled: true
+    }, {
+      id: 'test-panel-colors', name: 'Panel colors', host: '127.0.0.1', port: udpPort,
+      source: 'tramites', template: '', unit: 'auto', displayMode: 'both',
+      colorsEnabled: true, labelColor: '#00ff00', timeColor: 'ff0000', enabled: true
     }]
   }));
 
@@ -90,10 +95,12 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
   const match = await waitForOutput(child, /127\.0\.0\.1:(\d+)/);
   const dashboardPort = Number(match[1]);
 
-  for (let attempt = 0; attempt < 30 && udpMessages.length < 3; attempt += 1) {
+  for (let attempt = 0; attempt < 30 && udpMessages.length < 4; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  assert.deepEqual(udpMessages.sort(), ['2 DÍAS', '2835 MIN', 'TRÁMITES'].sort());
+  assert.deepEqual(udpMessages.sort(), [
+    '2 DÍAS', '2835 MIN', '[00FF00]TRÁMITES', '[00FF00]TRÁMITES [FF0000]2 DÍAS'
+  ].sort());
 
   const stateResponse = await fetch(`http://127.0.0.1:${dashboardPort}/api/state`);
   assert.equal(stateResponse.status, 200);
@@ -101,7 +108,11 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
   assert.equal(state.results.tiempo_total, 2835);
   assert.equal(state.health.status, 'ok');
   assert.equal(state.events.filter((event) => event.kind === 'api').length, 2);
-  assert.equal(state.events.filter((event) => event.kind === 'udp').length, 3);
+  assert.equal(state.events.filter((event) => event.kind === 'udp').length, 4);
+  const coloredPanel = state.config.panels.find((panel) => panel.id === 'test-panel-colors');
+  assert.equal(coloredPanel.labelColor, '00FF00');
+  assert.equal(coloredPanel.timeColor, 'FF0000');
+  assert.equal(coloredPanel.colorsEnabled, true);
 
   const protectedResponse = await fetch(`http://127.0.0.1:${dashboardPort}/api/network/ipv4`, {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}'
@@ -110,7 +121,9 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
 
   const pageResponse = await fetch(`http://127.0.0.1:${dashboardPort}/`);
   assert.equal(pageResponse.status, 200);
-  assert.match(await pageResponse.text(), /CHASKI · Control RNE/);
+  const page = await pageResponse.text();
+  assert.match(page, /CHASKI · Control RNE/);
+  assert.match(page, /Usar colores RGB/);
 
   const logoResponse = await fetch(`http://127.0.0.1:${dashboardPort}/assets/chaski-mark.svg`);
   assert.equal(logoResponse.status, 200);

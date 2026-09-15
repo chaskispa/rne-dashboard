@@ -133,7 +133,7 @@
         <label>Dirección IP<input id="panelHost" required placeholder="192.168.1.50" inputmode="url"></label>
       </div>
       <div class="form-grid two narrow-second">
-        <label>Contenido
+        <label>Fuente de datos
           <select id="panelSource">
             <option value="total">Tiempo total</option>
             <option value="hospitalario">Hospitalario</option>
@@ -159,13 +159,24 @@
             <option value="years">Años (365 días)</option>
           </select>
         </label>
-        <label>Contenido
+        <label>Formato del mensaje
           <select id="panelDisplayMode">
             <option value="both">Etiqueta + tiempo</option>
             <option value="time">Solo tiempo</option>
             <option value="label">Solo etiqueta</option>
           </select>
         </label>
+      </div>
+      <div id="colorOptions">
+        <label class="switch-row"><input id="panelColorsEnabled" type="checkbox"><span>Usar colores RGB</span></label>
+        <div id="colorFields" class="form-grid two" hidden>
+          <label id="labelColorField">Color de etiqueta
+            <span class="color-control"><input id="panelLabelColor" type="color" value="#00ff00"><output id="panelLabelColorValue">#00FF00</output></span>
+          </label>
+          <label id="timeColorField">Color del tiempo
+            <span class="color-control"><input id="panelTimeColor" type="color" value="#ff0000"><output id="panelTimeColorValue">#FF0000</output></span>
+          </label>
+        </div>
       </div>
       <div id="templateField" hidden>
         <label>Plantilla personalizada

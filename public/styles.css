@@ -149,10 +149,13 @@ h2 { font-size: 1.25rem; }
 label { display: block; font-weight: 700; font-size: .82rem; margin-bottom: 14px; }
 input, select { width: 100%; margin-top: 7px; padding: 11px 12px; color: var(--text); background: white; border: 1px solid var(--line-strong); border-radius: 0; outline: none; }
 input:focus, select:focus { border-color: var(--text); box-shadow: 4px 4px 0 rgba(24,24,25,.14); }
+input[type="color"] { height: 44px; padding: 4px; cursor: pointer; }
 .optional { color: var(--muted); font-weight: 400; }
 .token-help { margin: -5px 0 18px; color: var(--muted); font-size: .75rem; line-height: 1.55; }
 .switch-row { display: flex; align-items: center; gap: 9px; }
 .switch-row input { width: 18px; height: 18px; margin: 0; accent-color: var(--red); }
+.color-control { display: grid; grid-template-columns: minmax(90px, 1fr) auto; gap: 10px; align-items: center; }
+.color-control output { min-width: 72px; color: var(--muted); font: .76rem/1 "Chaski Mono", monospace; }
 .form-error { min-height: 18px; color: var(--red); font-size: .8rem; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 10px; }
 .network-dialog { width: min(720px, calc(100vw - 28px)); }

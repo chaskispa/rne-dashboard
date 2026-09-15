@@ -17,6 +17,17 @@ const unitLabels = {
 };
 const displayModeLabels = { both: 'Etiqueta + tiempo', time: 'Solo tiempo', label: 'Solo etiqueta' };
 
+function panelDisplayMode(panel) {
+  return panel.displayMode || (panel.showLabel === false ? 'time' : 'both');
+}
+
+function panelFormatSummary(panel) {
+  const mode = panelDisplayMode(panel);
+  const unit = mode === 'label' ? '' : ` · ${unitLabels[panel.unit || 'auto']}`;
+  const color = panel.colorsEnabled ? ' · RGB' : '';
+  return `${displayModeLabels[mode]}${unit}${color}`;
+}
+
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>'"]/g, (character) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
@@ -112,7 +123,7 @@ function renderPanels() {
       <div><p class="panel-name">${escapeHtml(panel.name)}</p><div class="panel-meta">${escapeHtml(panel.host)}:${panel.port}</div><div class="send-status"><i class="status-dot ${statusClass}"></i>${escapeHtml(statusText)}</div></div>
       <div class="route-source"><strong>${escapeHtml(sourceLabels[panel.source] || panel.source)}</strong>${escapeHtml(
         timedSources.includes(panel.source)
-          ? `${displayModeLabels[panel.displayMode || (panel.showLabel === false ? 'time' : 'both')]}${panel.displayMode === 'label' ? '' : ` · ${unitLabels[panel.unit || 'auto']}`}`
+          ? panelFormatSummary(panel)
           : panel.source === 'custom' ? (panel.template || 'Plantilla personalizada') : 'Texto público'
       )}</div>
       <div class="panel-actions">
@@ -285,7 +296,11 @@ function openPanelDialog(panel = null) {
   $('#panelSource').value = panel?.source || 'total';
   $('#panelTemplate').value = panel?.template || '';
   $('#panelUnit').value = panel?.unit || 'auto';
-  $('#panelDisplayMode').value = panel?.displayMode || (panel?.showLabel === false ? 'time' : 'both');
+  $('#panelDisplayMode').value = panel ? panelDisplayMode(panel) : 'both';
+  $('#panelColorsEnabled').checked = panel?.colorsEnabled === true;
+  $('#panelLabelColor').value = `#${panel?.labelColor || '00FF00'}`;
+  $('#panelTimeColor').value = `#${panel?.timeColor || 'FF0000'}`;
+  updateColorValues();
   $('#panelEnabled').checked = panel?.enabled !== false;
   updatePanelFormatFields();
   $('#panelError').textContent = '';
@@ -296,14 +311,27 @@ function openPanelDialog(panel = null) {
 function updatePanelFormatFields() {
   const source = $('#panelSource').value;
   const isTimed = timedSources.includes(source);
+  const mode = $('#panelDisplayMode').value;
   $('#timeFormatFields').hidden = !isTimed;
-  $('#unitField').hidden = isTimed && $('#panelDisplayMode').value === 'label';
+  $('#unitField').hidden = isTimed && mode === 'label';
+  $('#colorOptions').hidden = !isTimed;
+  $('#colorFields').hidden = !isTimed || !$('#panelColorsEnabled').checked;
+  $('#labelColorField').hidden = mode === 'time';
+  $('#timeColorField').hidden = mode === 'label';
   $('#templateField').hidden = source !== 'custom';
+}
+
+function updateColorValues() {
+  $('#panelLabelColorValue').value = $('#panelLabelColor').value.toUpperCase();
+  $('#panelTimeColorValue').value = $('#panelTimeColor').value.toUpperCase();
 }
 
 $('#addPanelButton').addEventListener('click', () => openPanelDialog());
 $('#panelSource').addEventListener('change', updatePanelFormatFields);
 $('#panelDisplayMode').addEventListener('change', updatePanelFormatFields);
+$('#panelColorsEnabled').addEventListener('change', updatePanelFormatFields);
+$('#panelLabelColor').addEventListener('input', updateColorValues);
+$('#panelTimeColor').addEventListener('input', updateColorValues);
 $('#networkButton').addEventListener('click', openNetworkDialog);
 $$('[data-close-dialog]').forEach((button) => button.addEventListener('click', () => button.closest('dialog').close()));
 $$('.dialog').forEach((dialog) => dialog.addEventListener('click', (event) => {
@@ -317,7 +345,11 @@ $('#panelForm').addEventListener('submit', async (event) => {
     name: $('#panelName').value, host: $('#panelHost').value,
     port: Number($('#panelPort').value), source: $('#panelSource').value,
     template: $('#panelTemplate').value, unit: $('#panelUnit').value,
-    displayMode: $('#panelDisplayMode').value, enabled: $('#panelEnabled').checked
+    displayMode: $('#panelDisplayMode').value,
+    colorsEnabled: $('#panelColorsEnabled').checked,
+    labelColor: $('#panelLabelColor').value.slice(1),
+    timeColor: $('#panelTimeColor').value.slice(1),
+    enabled: $('#panelEnabled').checked
   };
   try {
     await request(id ? `/api/panels/${id}` : '/api/panels', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
@@ -468,7 +500,9 @@ function registerWebMcpTools() {
         totalMinutes: state.data.results?.tiempo_total ?? null,
         lastPollAt: state.data.lastPollAt,
         detectedLanDevices: state.data.lan?.devices?.length || 0,
-        panels: state.data.config.panels.map(({ id, name, host, port, source, unit, displayMode, enabled }) => ({ id, name, host, port, source, unit, displayMode, enabled }))
+        panels: state.data.config.panels.map(({ id, name, host, port, source, unit, displayMode, colorsEnabled, labelColor, timeColor, enabled }) => ({
+          id, name, host, port, source, unit, displayMode, colorsEnabled, labelColor, timeColor, enabled
+        }))
       };
     }
   });

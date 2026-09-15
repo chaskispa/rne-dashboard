@@ -56,6 +56,18 @@ tiempo** y **Solo etiqueta**. Por ejemplo, un panel puede recibir `TRÁMITES 8
 MESES`, `8 MESES` o solamente `TRÁMITES`. Los mensajes para paneles usan
 números enteros sin decimales ni separadores de miles.
 
+Para los contenidos de tiempo se pueden activar colores RGB independientes
+para la etiqueta y el tiempo. Los colores se envían con el formato que entiende
+el firmware y las etiquetas no ocupan espacio visible. Por ejemplo:
+
+```text
+[00FF00]TRÁMITES [FF0000]8 MESES
+```
+
+En **Solo etiqueta** se usa únicamente el color de etiqueta; en **Solo tiempo**,
+únicamente el color del tiempo. Si los colores están desactivados, el mensaje se
+envía sin etiquetas RGB, como antes.
+
 ## Plantillas personalizadas
 
 Cada ruta acepta estas variables:
@@ -65,8 +77,9 @@ Cada ruta acepta estas variables:
 - `{latest_minutes}`, `{latest_area}`, `{latest_comuna}`, `{latest_region}`
 - `{latest_testimony}`
 
-El mensaje final se normaliza a una línea y se limita a 80 caracteres, que es
-el máximo animado del firmware actual.
+El mensaje final se normaliza a una línea y se limita a 80 caracteres visibles,
+que es el máximo animado del firmware actual. Las etiquetas `[RRGGBB]` válidas
+no cuentan para ese límite.
 
 ## Instalación fácil en Raspberry Pi OS Lite
 

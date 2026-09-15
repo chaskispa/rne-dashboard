@@ -69,6 +69,11 @@ function isIpv4OrHostname(value) {
   return true;
 }
 
+function normalizeRgbColor(value, fallback) {
+  const match = String(value || '').trim().match(/^#?([0-9a-f]{6})$/i);
+  return match ? match[1].toUpperCase() : fallback;
+}
+
 function validatePanel(candidate, existing = {}) {
   const panel = { ...existing, ...candidate };
   panel.id = existing.id || randomUUID();
@@ -82,6 +87,9 @@ function validatePanel(candidate, existing = {}) {
     ? panel.displayMode
     : panel.showLabel === false ? 'time' : 'both';
   delete panel.showLabel;
+  panel.colorsEnabled = panel.colorsEnabled === true;
+  panel.labelColor = normalizeRgbColor(panel.labelColor, '00FF00');
+  panel.timeColor = normalizeRgbColor(panel.timeColor, 'FF0000');
   panel.enabled = panel.enabled !== false;
   if (!panel.name) throw new Error('El panel necesita un nombre.');
   if (!isIpv4OrHostname(panel.host)) throw new Error('La dirección del panel no es válida.');
@@ -274,19 +282,42 @@ function timedPanelLabel(panel, context) {
   return labels[panel.source];
 }
 
+function coloredText(color, value) {
+  return `[${color}]${value}`;
+}
+
+function clipUdpText(value, maxVisibleCharacters = 80) {
+  const normalized = value.replace(/[\r\n]+/g, ' ').trim();
+  const tokens = normalized.match(/\[[0-9a-f]{6}\]|./giu) || [];
+  let visibleCharacters = 0;
+  let clipped = '';
+  for (const token of tokens) {
+    if (/^\[[0-9a-f]{6}\]$/iu.test(token)) {
+      clipped += token;
+    } else if (visibleCharacters < maxVisibleCharacters) {
+      clipped += token;
+      visibleCharacters += 1;
+    } else {
+      break;
+    }
+  }
+  return clipped || 'SIN DATOS';
+}
+
 function renderPanelMessage(panel, data) {
   const context = contextFromResults(data);
   const minutes = timedPanelValue(panel, context);
   let rendered;
   if (minutes !== undefined) {
     const label = timedPanelLabel(panel, context);
+    const labelText = panel.colorsEnabled ? coloredText(panel.labelColor, label) : label;
     if (panel.displayMode === 'label') {
-      rendered = label;
+      rendered = labelText;
     } else {
       const duration = formatDuration(minutes, panel.unit);
-      rendered = panel.displayMode === 'time'
-        ? `${duration.value} ${duration.unit}`
-        : `${label} ${duration.value} ${duration.unit}`;
+      const time = `${duration.value} ${duration.unit}`;
+      const timeText = panel.colorsEnabled ? coloredText(panel.timeColor, time) : time;
+      rendered = panel.displayMode === 'time' ? timeText : `${labelText} ${timeText}`;
     }
   } else if (panel.source === 'latest_testimony') {
     rendered = context.latest_testimony;
@@ -296,7 +327,7 @@ function renderPanelMessage(panel, data) {
       Object.hasOwn(context, key) ? String(context[key]) : match
     ));
   }
-  return Array.from(rendered.replace(/[\r\n]+/g, ' ').trim()).slice(0, 80).join('') || 'SIN DATOS';
+  return clipUdpText(rendered);
 }
 
 function sendUdp(panel, message, reason = 'sync') {
