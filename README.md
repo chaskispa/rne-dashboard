@@ -17,7 +17,7 @@ envía texto a controladores `RGB_ETHERNET` mediante UDP.
 - Detecta cada 60 segundos los equipos visibles en la LAN, intenta resolver sus
   hostnames y muestra IP, MAC, fabricante e interfaz.
 - Puede asignar a cada panel el total, una categoría, la última espera, el
-  último testimonio o una plantilla personalizada.
+  último testimonio, el mapa de Gran Santiago o una plantilla personalizada.
 - Guarda las rutas de paneles en `data/config.json` mediante escritura atómica.
   El archivo no se versiona.
 - Envía texto UTF-8 al puerto UDP 5000, compatible con `../RGB_ETHERNET`.
@@ -131,12 +131,24 @@ sudo systemctl restart rne-dashboard
 
 ## Mapas RGB565
 
-La API RNE también publica mapas RGB565, pero el firmware `RGB_ETHERNET` recibe
-por UDP solamente texto. Su endpoint HTTP `/bitmap` exige exactamente el tamaño
-horizontal del controlador (`96×16`, `192×16`, etc.), mientras los mapas RNE
-son `16×96` y `96×96`. Por eso esta versión no los reenvía automáticamente: se
-necesita definir primero una transformación visual (rotación, recorte o
-segmentación) y enviarla por HTTP, no por UDP.
+Para un controlador configurado como **18 paneles (3×6 serpentine, 96×96)**,
+crea una ruta y selecciona **Mapa Gran Santiago 96×96**. El puerto cambia a
+`5001` automáticamente. Cada 30 segundos el dashboard descarga directamente:
+
+```text
+/api/results/maps/gran-santiago.rgb565
+```
+
+El archivo ya contiene los 18.432 bytes RGB565 big-endian finales. El dashboard
+lo divide en 18 datagramas con cabecera `RGBU`, los envía en orden y espera la
+confirmación del controlador. Si no recibe confirmación, reintenta el cuadro
+completo una vez y registra el envío como error. **Reenviar** descarga y envía
+el mapa inmediatamente.
+
+La ruta de texto UDP `5000` continúa disponible para los demás tipos de panel.
+El script `send_bitmap_udp.py` puede usarse para pruebas manuales con imágenes
+locales, pero el servicio no necesita Python ni Pillow para reenviar el mapa de
+la API.
 
 ## Identidad visual
 

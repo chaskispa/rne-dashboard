@@ -5,13 +5,15 @@ const state = { data: null, network: null, filter: 'all', tick: null, toastTimer
 const sourceLabels = {
   total: 'Tiempo total', hospitalario: 'Hospitalario', tramites: 'Trámites',
   transporte: 'Transporte', vivienda: 'Vivienda', otro: 'Otro',
-  latest_wait: 'Última espera', latest_testimony: 'Último testimonio', custom: 'Plantilla personalizada'
+  latest_wait: 'Última espera', latest_testimony: 'Último testimonio',
+  map_gran_santiago: 'Mapa Gran Santiago 96×96', custom: 'Plantilla personalizada'
 };
 const categoryLabels = {
   hospitalario: 'Hospitalario', tramites: 'Trámites', transporte: 'Transporte',
   vivienda: 'Vivienda', otro: 'Otro'
 };
 const timedSources = ['total', 'hospitalario', 'tramites', 'transporte', 'vivienda', 'otro', 'latest_wait'];
+const bitmapSources = ['map_gran_santiago'];
 const unitLabels = {
   auto: 'Unidad automática', minutes: 'Minutos', hours: 'Horas', days: 'Días', months: 'Meses', years: 'Años'
 };
@@ -124,10 +126,11 @@ function renderPanels() {
       <div class="route-source"><strong>${escapeHtml(sourceLabels[panel.source] || panel.source)}</strong>${escapeHtml(
         timedSources.includes(panel.source)
           ? panelFormatSummary(panel)
+          : bitmapSources.includes(panel.source) ? 'RGB565 · 96×96 · con confirmación'
           : panel.source === 'custom' ? (panel.template || 'Plantilla personalizada') : 'Texto público'
       )}</div>
       <div class="panel-actions">
-        <button class="small-action" data-action="test" title="Enviar prueba" aria-label="Probar ${escapeHtml(panel.name)}">Probar</button>
+        <button class="small-action" data-action="test" title="${bitmapSources.includes(panel.source) ? 'Reenviar mapa' : 'Enviar prueba'}" aria-label="Probar ${escapeHtml(panel.name)}">${bitmapSources.includes(panel.source) ? 'Reenviar' : 'Probar'}</button>
         <button class="small-action" data-action="edit" title="Editar" aria-label="Editar ${escapeHtml(panel.name)}">Editar</button>
         <button class="small-action" data-action="delete" title="Eliminar" aria-label="Eliminar ${escapeHtml(panel.name)}">×</button>
       </div>
@@ -292,8 +295,10 @@ function openPanelDialog(panel = null) {
   $('#panelId').value = panel?.id || '';
   $('#panelName').value = panel?.name || '';
   $('#panelHost').value = panel?.host || '';
-  $('#panelPort').value = panel?.port || 5000;
-  $('#panelSource').value = panel?.source || 'total';
+  const source = panel?.source || 'total';
+  $('#panelSource').value = source;
+  $('#panelSource').dataset.previous = source;
+  $('#panelPort').value = panel?.port || (bitmapSources.includes(source) ? 5001 : 5000);
   $('#panelTemplate').value = panel?.template || '';
   $('#panelUnit').value = panel?.unit || 'auto';
   $('#panelDisplayMode').value = panel ? panelDisplayMode(panel) : 'both';
@@ -319,6 +324,7 @@ function updatePanelFormatFields() {
   $('#labelColorField').hidden = mode === 'time';
   $('#timeColorField').hidden = mode === 'label';
   $('#templateField').hidden = source !== 'custom';
+  $('#bitmapField').hidden = !bitmapSources.includes(source);
 }
 
 function updateColorValues() {
@@ -327,7 +333,16 @@ function updateColorValues() {
 }
 
 $('#addPanelButton').addEventListener('click', () => openPanelDialog());
-$('#panelSource').addEventListener('change', updatePanelFormatFields);
+$('#panelSource').addEventListener('change', () => {
+  const source = $('#panelSource').value;
+  const previous = $('#panelSource').dataset.previous || 'total';
+  const previousDefault = bitmapSources.includes(previous) ? 5001 : 5000;
+  if (Number($('#panelPort').value) === previousDefault) {
+    $('#panelPort').value = bitmapSources.includes(source) ? 5001 : 5000;
+  }
+  $('#panelSource').dataset.previous = source;
+  updatePanelFormatFields();
+});
 $('#panelDisplayMode').addEventListener('change', updatePanelFormatFields);
 $('#panelColorsEnabled').addEventListener('change', updatePanelFormatFields);
 $('#panelLabelColor').addEventListener('input', updateColorValues);
@@ -432,6 +447,14 @@ $('#panelList').addEventListener('click', async (event) => {
   if (!panel) return;
   if (action === 'edit') return openPanelDialog(panel);
   if (action === 'test') {
+    if (bitmapSources.includes(panel.source)) {
+      try {
+        await request(`/api/panels/${panel.id}/test`, { method: 'POST', body: '{}' });
+        toast('Mapa enviado y confirmado');
+        await refresh();
+      } catch (error) { toast(error.message); }
+      return;
+    }
     $('#testPanelId').value = panel.id;
     $('#testMessage').value = 'PRUEBA RNE';
     $('#testError').textContent = '';
@@ -523,27 +546,30 @@ function registerWebMcpTools() {
   register({
     name: 'send_led_panel_test',
     title: 'Send LED panel test',
-    description: 'Send one direct UTF-8 test message to a configured LED panel over UDP.',
+    description: 'Send a UTF-8 test message, or resend the live map for a 96x96 bitmap panel.',
     inputSchema: {
       type: 'object',
       properties: {
         panelId: { type: 'string', description: 'ID returned by read_rne_dashboard_status.' },
-        message: { type: 'string', minLength: 1, maxLength: 80 }
+        message: { type: 'string', minLength: 1, maxLength: 80, description: 'Required for text panels; ignored for bitmap panels.' }
       },
-      required: ['panelId', 'message'],
+      required: ['panelId'],
       additionalProperties: false
     },
     annotations: { readOnlyHint: false, untrustedContentHint: false },
     async execute(input) {
-      if (!input || typeof input.panelId !== 'string' || typeof input.message !== 'string' || !input.message.trim() || Array.from(input.message).length > 80) {
-        throw new Error('panelId and a message of 1–80 characters are required.');
+      if (!input || typeof input.panelId !== 'string') throw new Error('panelId is required.');
+      const panel = state.data?.config.panels.find((item) => item.id === input.panelId);
+      if (!panel) throw new Error('Panel route not found.');
+      const isBitmap = bitmapSources.includes(panel.source);
+      if (!isBitmap && (typeof input.message !== 'string' || !input.message.trim() || Array.from(input.message).length > 80)) {
+        throw new Error('Text panels require a message of 1–80 characters.');
       }
-      if (!state.data?.config.panels.some((panel) => panel.id === input.panelId)) throw new Error('Panel route not found.');
       await request(`/api/panels/${encodeURIComponent(input.panelId)}/test`, {
-        method: 'POST', body: JSON.stringify({ message: input.message })
+        method: 'POST', body: JSON.stringify({ message: input.message || '' })
       });
       await refresh();
-      return { sent: true, panelId: input.panelId, message: input.message };
+      return { sent: true, panelId: input.panelId, kind: isBitmap ? 'bitmap' : 'text', message: isBitmap ? null : input.message };
     }
   });
 }

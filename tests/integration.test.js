@@ -35,6 +35,8 @@ const categoriesFixture = {
   }]
 };
 
+const bitmapFixture = Buffer.alloc(96 * 96 * 2, 0x5A);
+
 function listen(server) {
   return new Promise((resolve, reject) => {
     server.once('error', reject);
@@ -64,7 +66,44 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
   udp.on('message', (message) => udpMessages.push(message.toString('utf8')));
   const udpPort = await new Promise((resolve) => udp.bind(0, '127.0.0.1', () => resolve(udp.address().port)));
 
+  let bitmapPayload = null;
+  let bitmapFrameId = null;
+  const bitmapChunks = new Map();
+  const bitmapUdp = dgram.createSocket('udp4');
+  bitmapUdp.on('message', (message, remote) => {
+    if (message.length < 8 || message.subarray(0, 4).toString() !== 'RGBU') return;
+    const frameId = message.readUInt16BE(4);
+    const chunkIndex = message[6];
+    const chunkCount = message[7];
+    if (chunkCount !== 18 || chunkIndex >= chunkCount) return;
+    if (bitmapFrameId !== frameId) {
+      bitmapFrameId = frameId;
+      bitmapChunks.clear();
+      bitmapPayload = null;
+    }
+    bitmapChunks.set(chunkIndex, message.subarray(8));
+    if (bitmapChunks.size === chunkCount) {
+      bitmapPayload = Buffer.concat(Array.from({ length: chunkCount }, (_, index) => bitmapChunks.get(index)));
+      const acknowledgement = Buffer.concat([
+        Buffer.from('RGBU'), Buffer.from([frameId >> 8, frameId & 0xFF]), Buffer.from('OK')
+      ]);
+      bitmapUdp.send(acknowledgement, remote.port, remote.address);
+    }
+  });
+  const bitmapPort = await new Promise((resolve) => bitmapUdp.bind(0, '127.0.0.1', () => resolve(bitmapUdp.address().port)));
+
   const mockApi = http.createServer((request, reply) => {
+    if (request.url === '/api/results/maps/gran-santiago.rgb565') {
+      reply.writeHead(200, {
+        'content-type': 'application/octet-stream',
+        'content-length': bitmapFixture.length,
+        'x-bitmap-width': '96',
+        'x-bitmap-height': '96',
+        'x-byte-order': 'big-endian'
+      });
+      reply.end(bitmapFixture);
+      return;
+    }
     const payload = {
       '/api/results.json': fixture,
       '/api/results': summaryFixture,
@@ -97,6 +136,9 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
       id: 'test-panel-colors', name: 'Panel colors', host: '127.0.0.1', port: udpPort,
       source: 'tramites', template: '', unit: 'auto', displayMode: 'both',
       colorsEnabled: true, labelColor: '#00ff00', timeColor: 'ff0000', enabled: true
+    }, {
+      id: 'test-panel-map', name: 'Panel map', host: '127.0.0.1', port: bitmapPort,
+      source: 'map_gran_santiago', enabled: true
     }]
   }));
 
@@ -111,6 +153,7 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
   context.after(async () => {
     child.kill('SIGTERM');
     udp.close();
+    bitmapUdp.close();
     mockApi.close();
     await rm(dataDir, { recursive: true, force: true });
   });
@@ -118,12 +161,16 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
   const match = await waitForOutput(child, /127\.0\.0\.1:(\d+)/);
   const dashboardPort = Number(match[1]);
 
-  for (let attempt = 0; attempt < 30 && udpMessages.length < 4; attempt += 1) {
+  for (let attempt = 0; attempt < 60 && (udpMessages.length < 4 || !bitmapPayload); attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   assert.deepEqual(udpMessages.sort(), [
     '2 DÍAS', '2.835 MIN', '[00FF00]TRÁMITES', '[00FF00]TRÁMITES [FF0000]2 DÍAS'
   ].sort());
+  assert.ok(bitmapPayload);
+  assert.equal(bitmapPayload.length, 96 * 96 * 2);
+  assert.equal(Buffer.compare(bitmapPayload, bitmapFixture), 0);
+  await new Promise((resolve) => setTimeout(resolve, 50));
 
   const stateResponse = await fetch(`http://127.0.0.1:${dashboardPort}/api/state`);
   assert.equal(stateResponse.status, 200);
@@ -134,8 +181,9 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
   assert.equal(state.results.unidad_tiempo, 'minutos');
   assert.equal(state.results.version, 3);
   assert.equal(state.health.status, 'ok');
-  assert.equal(state.events.filter((event) => event.kind === 'api').length, 4);
-  assert.equal(state.events.filter((event) => event.kind === 'udp').length, 4);
+  assert.equal(state.events.filter((event) => event.kind === 'api').length, 5);
+  assert.equal(state.events.filter((event) => event.kind === 'udp').length, 5);
+  assert.equal(state.panelRuntime['test-panel-map'].ok, true);
   const coloredPanel = state.config.panels.find((panel) => panel.id === 'test-panel-colors');
   assert.equal(coloredPanel.labelColor, '00FF00');
   assert.equal(coloredPanel.timeColor, 'FF0000');

@@ -29,7 +29,18 @@ const API_BASE_URL = process.env.NODE_ENV === 'test' && process.env.RNE_TEST_API
   ? process.env.RNE_TEST_API_BASE_URL
   : PRODUCTION_API_BASE_URL;
 const CATEGORIES = ['hospitalario', 'tramites', 'transporte', 'vivienda', 'otro'];
-const SOURCE_TYPES = ['total', ...CATEGORIES, 'latest_wait', 'latest_testimony', 'custom'];
+const BITMAP_SOURCE = 'map_gran_santiago';
+const BITMAP_ENDPOINT = '/api/results/maps/gran-santiago.rgb565';
+const BITMAP_WIDTH = 96;
+const BITMAP_HEIGHT = 96;
+const BITMAP_FRAME_BYTES = BITMAP_WIDTH * BITMAP_HEIGHT * 2;
+const BITMAP_MAGIC = Buffer.from('RGBU');
+const BITMAP_CHUNK_SIZE = 1024;
+const BITMAP_CHUNK_COUNT = Math.ceil(BITMAP_FRAME_BYTES / BITMAP_CHUNK_SIZE);
+const BITMAP_RETRIES = 2;
+const BITMAP_CHUNK_DELAY_MS = 10;
+const BITMAP_ACK_TIMEOUT_MS = 1_000;
+const SOURCE_TYPES = ['total', ...CATEGORIES, 'latest_wait', 'latest_testimony', BITMAP_SOURCE, 'custom'];
 const DISPLAY_UNITS = ['auto', 'minutes', 'hours', 'days', 'months', 'years'];
 const DISPLAY_MODES = ['both', 'time', 'label'];
 
@@ -79,8 +90,8 @@ function validatePanel(candidate, existing = {}) {
   panel.id = existing.id || randomUUID();
   panel.name = String(panel.name || '').trim().slice(0, 60);
   panel.host = String(panel.host || '').trim();
-  panel.port = Number(panel.port ?? 5000);
   panel.source = String(panel.source || 'total');
+  panel.port = Number(panel.port ?? (panel.source === BITMAP_SOURCE ? 5001 : 5000));
   panel.template = String(panel.template || '').trim().slice(0, 240);
   panel.unit = DISPLAY_UNITS.includes(panel.unit) ? panel.unit : 'auto';
   panel.displayMode = DISPLAY_MODES.includes(panel.displayMode)
@@ -175,7 +186,7 @@ function broadcast() {
   for (const client of sseClients) client.write(message);
 }
 
-async function fetchLogged(endpoint, type) {
+async function fetchLogged(endpoint, type, format = 'json') {
   const url = `${API_BASE_URL}${endpoint}`;
   const started = performance.now();
   try {
@@ -190,7 +201,7 @@ async function fetchLogged(endpoint, type) {
       ok: response.ok, durationMs, bytes: buffer.length
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const parsed = JSON.parse(buffer.toString('utf8'));
+    const parsed = format === 'buffer' ? buffer : JSON.parse(buffer.toString('utf8'));
     return { parsed, type };
   } catch (error) {
     if (!events[0] || events[0].target !== endpoint || events[0].ok !== false) {
@@ -394,9 +405,115 @@ function sendUdp(panel, message, reason = 'sync') {
   });
 }
 
-async function sendAllPanels(data) {
-  const enabled = config.panels.filter((panel) => panel.enabled);
+function wait(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function sendDatagram(socket, payload, panel) {
+  return new Promise((resolve, reject) => {
+    socket.send(payload, panel.port, panel.host, (error) => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
+}
+
+async function sendBitmapUdp(panel, payload, reason = 'sync') {
+  const started = performance.now();
+  let error = null;
+  let socket = null;
+  let frameId = null;
+  try {
+    if (!Buffer.isBuffer(payload) || payload.length !== BITMAP_FRAME_BYTES) {
+      throw new Error(`El mapa debe contener exactamente ${BITMAP_FRAME_BYTES} bytes RGB565.`);
+    }
+    frameId = Math.trunc(performance.now()) & 0xFFFF;
+    const expectedAck = Buffer.concat([
+      BITMAP_MAGIC,
+      Buffer.from([frameId >> 8, frameId & 0xFF]),
+      Buffer.from('OK')
+    ]);
+    let acknowledged = false;
+    let socketError = null;
+    socket = dgram.createSocket('udp4');
+    socket.on('message', (message) => {
+      if (message.equals(expectedAck)) acknowledged = true;
+    });
+    socket.on('error', (receivedError) => { socketError = receivedError; });
+
+    for (let attempt = 0; attempt < BITMAP_RETRIES && !acknowledged; attempt += 1) {
+      for (let chunkIndex = 0; chunkIndex < BITMAP_CHUNK_COUNT; chunkIndex += 1) {
+        if (socketError) throw socketError;
+        const offset = chunkIndex * BITMAP_CHUNK_SIZE;
+        const header = Buffer.concat([
+          BITMAP_MAGIC,
+          Buffer.from([
+            frameId >> 8,
+            frameId & 0xFF,
+            chunkIndex,
+            BITMAP_CHUNK_COUNT
+          ])
+        ]);
+        await sendDatagram(
+          socket,
+          Buffer.concat([header, payload.subarray(offset, offset + BITMAP_CHUNK_SIZE)]),
+          panel
+        );
+        if (chunkIndex < BITMAP_CHUNK_COUNT - 1) await wait(BITMAP_CHUNK_DELAY_MS);
+      }
+      const deadline = Date.now() + BITMAP_ACK_TIMEOUT_MS;
+      while (!acknowledged && Date.now() < deadline) {
+        if (socketError) throw socketError;
+        await wait(20);
+      }
+    }
+    if (!acknowledged) throw new Error('El panel no confirmó el bitmap completo.');
+  } catch (receivedError) {
+    error = receivedError;
+  } finally {
+    try { socket?.close(); } catch {}
+  }
+
+  const message = `Mapa Gran Santiago ${BITMAP_WIDTH}×${BITMAP_HEIGHT}`;
+  const runtime = {
+    at: new Date().toISOString(),
+    ok: !error,
+    message,
+    frameId,
+    error: error?.message || null
+  };
+  panelRuntime.set(panel.id, runtime);
+  addEvent({
+    kind: 'udp', method: 'UDP MAPA', panelId: panel.id, panelName: panel.name,
+    target: `${panel.host}:${panel.port}`, ok: !error, status: null,
+    durationMs: Math.round(performance.now() - started), bytes: payload?.length || 0,
+    message, reason, error: error?.message
+  });
+  return !error;
+}
+
+async function sendTextPanels(data) {
+  const enabled = config.panels.filter((panel) => panel.enabled && panel.source !== BITMAP_SOURCE);
   await Promise.all(enabled.map((panel) => sendUdp(panel, renderPanelMessage(panel, data))));
+}
+
+async function sendBitmapPanels(payload, reason = 'sync') {
+  const enabled = config.panels.filter((panel) => panel.enabled && panel.source === BITMAP_SOURCE);
+  await Promise.all(enabled.map((panel) => sendBitmapUdp(panel, payload, reason)));
+}
+
+function markBitmapPanelsFailed(error) {
+  const message = error?.message || 'No fue posible descargar el mapa desde la API.';
+  for (const panel of config.panels.filter((item) => item.enabled && item.source === BITMAP_SOURCE)) {
+    panelRuntime.set(panel.id, {
+      at: new Date().toISOString(), ok: false, message: 'Mapa Gran Santiago 96×96', error: message
+    });
+    addEvent({
+      kind: 'udp', method: 'UDP MAPA', panelId: panel.id, panelName: panel.name,
+      target: `${panel.host}:${panel.port}`, ok: false, status: null,
+      durationMs: 0, bytes: 0, reason: 'sync', error: message
+    });
+  }
 }
 
 async function poll() {
@@ -404,12 +521,17 @@ async function poll() {
   polling = true;
   nextPollAt = null;
   broadcast();
-  const [publicResultsResponse, summaryResponse, categoriesResponse, healthResponse] = await Promise.allSettled([
+  const hasBitmapPanels = config.panels.some((panel) => panel.enabled && panel.source === BITMAP_SOURCE);
+  const [publicResultsResponse, summaryResponse, categoriesResponse, healthResponse, bitmapResponse] = await Promise.allSettled([
     fetchLogged('/api/results.json', 'results'),
     fetchLogged('/api/results', 'summary'),
     fetchLogged('/api/results/categories', 'categories'),
-    fetchLogged('/health', 'health')
+    fetchLogged('/health', 'health'),
+    hasBitmapPanels
+      ? fetchLogged(BITMAP_ENDPOINT, 'bitmap', 'buffer')
+      : Promise.resolve({ parsed: null, type: 'bitmap' })
   ]);
+  const sends = [];
   if (
     publicResultsResponse.status === 'fulfilled'
     && summaryResponse.status === 'fulfilled'
@@ -421,7 +543,7 @@ async function poll() {
         summaryResponse.value.parsed,
         categoriesResponse.value.parsed
       );
-      await sendAllPanels(results);
+      sends.push(sendTextPanels(results));
     } catch (error) {
       addEvent({
         kind: 'api', method: 'NORMALIZE', target: 'resultados', status: null,
@@ -429,6 +551,12 @@ async function poll() {
       });
     }
   }
+  if (hasBitmapPanels && bitmapResponse.status === 'fulfilled') {
+    sends.push(sendBitmapPanels(bitmapResponse.value.parsed));
+  } else if (hasBitmapPanels) {
+    markBitmapPanelsFailed(bitmapResponse.reason);
+  }
+  await Promise.all(sends);
   health = healthResponse.status === 'fulfilled'
     ? healthResponse.value.parsed
     : { status: 'error', database: 'unknown' };
@@ -717,6 +845,13 @@ async function handleApi(request, reply, url) {
   if (request.method === 'POST' && testMatch) {
     const panel = config.panels.find((item) => item.id === testMatch[1]);
     if (!panel) return json(reply, 404, { error: 'Panel no encontrado.' });
+    if (panel.source === BITMAP_SOURCE) {
+      const bitmap = await fetchLogged(BITMAP_ENDPOINT, 'bitmap', 'buffer');
+      const sent = await sendBitmapUdp(panel, bitmap.parsed, 'test');
+      return sent
+        ? json(reply, 200, { ok: true })
+        : json(reply, 502, { error: 'El panel no confirmó la recepción del mapa.' });
+    }
     const body = await readBody(request);
     const message = Array.from(String(body.message || 'PRUEBA RNE').trim()).slice(0, 80).join('');
     await sendUdp(panel, message || 'PRUEBA RNE', 'test');

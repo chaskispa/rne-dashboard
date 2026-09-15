@@ -143,6 +143,7 @@
             <option value="otro">Otro</option>
             <option value="latest_wait">Última espera</option>
             <option value="latest_testimony">Último testimonio</option>
+            <option value="map_gran_santiago">Mapa Gran Santiago 96×96</option>
             <option value="custom">Plantilla personalizada</option>
           </select>
         </label>
@@ -184,6 +185,7 @@
         </label>
         <p class="token-help">Variables: {total_minutes}, {total_hours}, {hospitalario}, {tramites}, {latest_minutes}, {latest_comuna}, {latest_testimony}</p>
       </div>
+      <p id="bitmapField" class="token-help" hidden>Envía el mapa RGB565 de 96×96 desde la API al puerto UDP 5001 y espera la confirmación del panel.</p>
       <label class="switch-row"><input id="panelEnabled" type="checkbox" checked><span>Ruta activa</span></label>
       <p class="form-error" id="panelError" role="alert"></p>
       <div class="dialog-actions">
