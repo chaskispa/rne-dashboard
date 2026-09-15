@@ -99,7 +99,7 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   assert.deepEqual(udpMessages.sort(), [
-    '2 DÍAS', '2835 MIN', '[00FF00]TRÁMITES', '[00FF00]TRÁMITES [FF0000]2 DÍAS'
+    '2 DÍAS', '2.835 MIN', '[00FF00]TRÁMITES', '[00FF00]TRÁMITES [FF0000]2 DÍAS'
   ].sort());
 
   const stateResponse = await fetch(`http://127.0.0.1:${dashboardPort}/api/state`);

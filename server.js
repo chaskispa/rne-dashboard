@@ -251,7 +251,10 @@ function formatDuration(minutes, requestedUnit = 'auto') {
     years: Math.abs(value) === 1 ? 'AÑO' : 'AÑOS'
   };
   return {
-    value: String(value),
+    value: new Intl.NumberFormat('es-CL', {
+      useGrouping: true,
+      maximumFractionDigits: 0
+    }).format(value),
     unit: labels[unit]
   };
 }

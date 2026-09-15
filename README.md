@@ -54,7 +54,8 @@ se consideran 30 días por mes y 365 días por año.
 La opción **Contenido** permite elegir entre **Etiqueta + tiempo**, **Solo
 tiempo** y **Solo etiqueta**. Por ejemplo, un panel puede recibir `TRÁMITES 8
 MESES`, `8 MESES` o solamente `TRÁMITES`. Los mensajes para paneles usan
-números enteros sin decimales ni separadores de miles.
+números enteros sin decimales y un punto pequeño como separador de miles; por
+ejemplo, `2.835 MIN`.
 
 Para los contenidos de tiempo se pueden activar colores RGB independientes
 para la etiqueta y el tiempo. Los colores se envían con el formato que entiende
