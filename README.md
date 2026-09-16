@@ -17,7 +17,8 @@ envía texto a controladores `RGB_ETHERNET` mediante UDP.
 - Detecta cada 60 segundos los equipos visibles en la LAN, intenta resolver sus
   hostnames y muestra IP, MAC, fabricante e interfaz.
 - Puede asignar a cada panel el total, una categoría, la última espera, el
-  último testimonio, el mapa de Gran Santiago o una plantilla personalizada.
+  último testimonio, los mapas de Gran Santiago o Chile, o una plantilla
+  personalizada.
 - Guarda las rutas de paneles en `data/config.json` mediante escritura atómica.
   El archivo no se versiona.
 - Envía texto UTF-8 al puerto UDP 5000, compatible con `../RGB_ETHERNET`.
@@ -136,20 +137,23 @@ sudo systemctl restart rne-dashboard
 
 ## Mapas RGB565
 
-Para un controlador configurado como **18 paneles (3×6 serpentine, 96×96)**,
-el dashboard incluye una ruta para **Mapa Gran Santiago 96×96** en
-`192.168.100.23:5001`. También puede crearse o editarse desde la interfaz; al
-seleccionar esa fuente, el puerto cambia a `5001` automáticamente. Cada 30
-segundos el dashboard descarga directamente:
+El dashboard incluye una ruta para **Mapa Gran Santiago 96×96** en
+`192.168.100.23:5001` y otra para el panel **Mapa de Chile 16×96** en
+`192.168.100.28:5001`. También pueden crearse o editarse desde la interfaz; al
+seleccionar cualquiera de esas fuentes, el puerto cambia a `5001`
+automáticamente. Cada 30 segundos el dashboard descarga directamente:
 
 ```text
 /api/results/maps/gran-santiago.rgb565
+/api/results/maps/chile.rgb565
 ```
 
-El archivo ya contiene los 18.432 bytes RGB565 big-endian finales y se transmite
-sin rotar, redimensionar, transponer, serpentear ni reordenar píxeles. El Pico
-se encarga del mapeo físico. El dashboard divide el archivo en 18 datagramas con
-cabecera `RGBU`, espera 250 ms entre ellos, los envía en orden y espera la
+Gran Santiago contiene 18.432 bytes RGB565 big-endian y Chile contiene 3.072
+bytes. Ambos archivos se transmiten sin cambios: no se escalan, rotan,
+transponen ni reordenan los píxeles. El Pico se encarga del mapeo físico.
+
+El dashboard divide Gran Santiago en 18 datagramas y Chile en 3, todos con
+cabecera `RGBU`. Espera 250 ms entre ellos, los envía en orden y espera la
 confirmación exacta del controlador. Si no la recibe, reintenta el cuadro
 completo con el mismo ID y registra el envío como error. **Reenviar** descarga
 y envía el mapa inmediatamente.

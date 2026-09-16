@@ -29,34 +29,54 @@ const API_BASE_URL = process.env.NODE_ENV === 'test' && process.env.RNE_TEST_API
   ? process.env.RNE_TEST_API_BASE_URL
   : PRODUCTION_API_BASE_URL;
 const CATEGORIES = ['hospitalario', 'tramites', 'transporte', 'vivienda', 'otro'];
-const BITMAP_SOURCE = 'map_gran_santiago';
-const BITMAP_ENDPOINT = '/api/results/maps/gran-santiago.rgb565';
-const BITMAP_WIDTH = 96;
-const BITMAP_HEIGHT = 96;
-const BITMAP_FRAME_BYTES = BITMAP_WIDTH * BITMAP_HEIGHT * 2;
+const GRAN_SANTIAGO_BITMAP_SOURCE = 'map_gran_santiago';
+const BITMAP_SOURCES = {
+  [GRAN_SANTIAGO_BITMAP_SOURCE]: {
+    endpoint: '/api/results/maps/gran-santiago.rgb565',
+    width: 96,
+    height: 96,
+    label: 'Mapa Gran Santiago 96×96'
+  },
+  map_chile: {
+    endpoint: '/api/results/maps/chile.rgb565',
+    width: 16,
+    height: 96,
+    label: 'Mapa de Chile 16×96'
+  }
+};
 const BITMAP_MAGIC = Buffer.from('RGBU');
 const BITMAP_CHUNK_SIZE = 1024;
-const BITMAP_CHUNK_COUNT = Math.ceil(BITMAP_FRAME_BYTES / BITMAP_CHUNK_SIZE);
 const BITMAP_RETRIES = 2;
 const requestedBitmapDelay = Number(process.env.RNE_BITMAP_CHUNK_DELAY_MS ?? 250);
 const BITMAP_CHUNK_DELAY_MS = Number.isFinite(requestedBitmapDelay) && requestedBitmapDelay >= 0
   ? requestedBitmapDelay
   : 250;
 const BITMAP_ACK_TIMEOUT_MS = 1_000;
-const SOURCE_TYPES = ['total', ...CATEGORIES, 'latest_wait', 'latest_testimony', BITMAP_SOURCE, 'custom'];
+const SOURCE_TYPES = ['total', ...CATEGORIES, 'latest_wait', 'latest_testimony', ...Object.keys(BITMAP_SOURCES), 'custom'];
 const DISPLAY_UNITS = ['auto', 'minutes', 'hours', 'days', 'months', 'years'];
 const DISPLAY_MODES = ['both', 'time', 'label'];
 
 const defaultConfig = {
   bitmapPanelProvisioned: true,
-  panels: [{
-    id: 'gran-santiago-96x96',
-    name: 'Mapa Gran Santiago 96×96',
-    host: '192.168.100.23',
-    port: 5001,
-    source: BITMAP_SOURCE,
-    enabled: true
-  }]
+  chileBitmapPanelProvisioned: true,
+  panels: [
+    {
+      id: 'gran-santiago-96x96',
+      name: 'Mapa Gran Santiago 96×96',
+      host: '192.168.100.23',
+      port: 5001,
+      source: GRAN_SANTIAGO_BITMAP_SOURCE,
+      enabled: true
+    },
+    {
+      id: 'chile-16x96',
+      name: 'Mapa de Chile 16×96',
+      host: '192.168.100.28',
+      port: 5001,
+      source: 'map_chile',
+      enabled: true
+    }
+  ]
 };
 
 let config = structuredClone(defaultConfig);
@@ -96,13 +116,17 @@ function normalizeRgbColor(value, fallback) {
   return match ? match[1].toUpperCase() : fallback;
 }
 
+function isBitmapSource(source) {
+  return Object.hasOwn(BITMAP_SOURCES, source);
+}
+
 function validatePanel(candidate, existing = {}) {
   const panel = { ...existing, ...candidate };
   panel.id = existing.id || randomUUID();
   panel.name = String(panel.name || '').trim().slice(0, 60);
   panel.host = String(panel.host || '').trim();
   panel.source = String(panel.source || 'total');
-  panel.port = Number(panel.port ?? (panel.source === BITMAP_SOURCE ? 5001 : 5000));
+  panel.port = Number(panel.port ?? (isBitmapSource(panel.source) ? 5001 : 5000));
   panel.template = String(panel.template || '').trim().slice(0, 240);
   panel.unit = DISPLAY_UNITS.includes(panel.unit) ? panel.unit : 'auto';
   panel.displayMode = DISPLAY_MODES.includes(panel.displayMode)
@@ -128,10 +152,11 @@ async function loadConfig() {
     config.panels = Array.isArray(saved.panels)
       ? saved.panels.map((panel) => validatePanel(panel, { id: panel.id || randomUUID() }))
       : [];
+    let configChanged = false;
     config.bitmapPanelProvisioned = saved.bitmapPanelProvisioned === true;
     if (!config.bitmapPanelProvisioned) {
       const alreadyConfigured = config.panels.some((panel) => (
-        panel.source === BITMAP_SOURCE
+        panel.source === GRAN_SANTIAGO_BITMAP_SOURCE
         && panel.host === '192.168.100.23'
         && panel.port === 5001
       ));
@@ -139,8 +164,22 @@ async function loadConfig() {
         config.panels.push(validatePanel(defaultConfig.panels[0], { id: defaultConfig.panels[0].id }));
       }
       config.bitmapPanelProvisioned = true;
-      await saveConfig();
+      configChanged = true;
     }
+    config.chileBitmapPanelProvisioned = saved.chileBitmapPanelProvisioned === true;
+    if (!config.chileBitmapPanelProvisioned) {
+      const alreadyConfigured = config.panels.some((panel) => (
+        panel.source === 'map_chile'
+        && panel.host === '192.168.100.28'
+        && panel.port === 5001
+      ));
+      if (!alreadyConfigured) {
+        config.panels.push(validatePanel(defaultConfig.panels[1], { id: defaultConfig.panels[1].id }));
+      }
+      config.chileBitmapPanelProvisioned = true;
+      configChanged = true;
+    }
+    if (configChanged) await saveConfig();
   } catch (error) {
     if (error.code !== 'ENOENT') console.error('Could not load config:', error.message);
   }
@@ -447,15 +486,28 @@ function sendDatagram(socket, payload, panel) {
   });
 }
 
+function prepareBitmapFrame(source, payload) {
+  const bitmap = BITMAP_SOURCES[source];
+  if (!bitmap) throw new Error('La fuente de mapa no es válida.');
+  const expectedBytes = bitmap.width * bitmap.height * 2;
+  if (!Buffer.isBuffer(payload) || payload.length !== expectedBytes) {
+    throw new Error(`${bitmap.label} debe contener exactamente ${expectedBytes} bytes RGB565.`);
+  }
+  return payload;
+}
+
 async function sendBitmapUdp(panel, payload, reason = 'sync') {
   const started = performance.now();
   let error = null;
   let socket = null;
   let frameId = null;
   try {
-    if (!Buffer.isBuffer(payload) || payload.length !== BITMAP_FRAME_BYTES) {
-      throw new Error(`El mapa debe contener exactamente ${BITMAP_FRAME_BYTES} bytes RGB565.`);
+    const bitmap = BITMAP_SOURCES[panel.source];
+    const expectedBytes = bitmap?.width * bitmap?.height * 2;
+    if (!bitmap || !Buffer.isBuffer(payload) || payload.length !== expectedBytes) {
+      throw new Error(`${bitmap?.label || 'El mapa'} debe contener exactamente ${expectedBytes || 0} bytes RGB565.`);
     }
+    const chunkCount = Math.ceil(payload.length / BITMAP_CHUNK_SIZE);
     frameId = Math.trunc(performance.now()) & 0xFFFF;
     const expectedAck = Buffer.concat([
       BITMAP_MAGIC,
@@ -471,7 +523,7 @@ async function sendBitmapUdp(panel, payload, reason = 'sync') {
     socket.on('error', (receivedError) => { socketError = receivedError; });
 
     for (let attempt = 0; attempt < BITMAP_RETRIES && !acknowledged; attempt += 1) {
-      for (let chunkIndex = 0; chunkIndex < BITMAP_CHUNK_COUNT; chunkIndex += 1) {
+      for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex += 1) {
         if (socketError) throw socketError;
         const offset = chunkIndex * BITMAP_CHUNK_SIZE;
         const header = Buffer.concat([
@@ -480,7 +532,7 @@ async function sendBitmapUdp(panel, payload, reason = 'sync') {
             frameId >> 8,
             frameId & 0xFF,
             chunkIndex,
-            BITMAP_CHUNK_COUNT
+            chunkCount
           ])
         ]);
         await sendDatagram(
@@ -488,7 +540,7 @@ async function sendBitmapUdp(panel, payload, reason = 'sync') {
           Buffer.concat([header, payload.subarray(offset, offset + BITMAP_CHUNK_SIZE)]),
           panel
         );
-        if (chunkIndex < BITMAP_CHUNK_COUNT - 1) await wait(BITMAP_CHUNK_DELAY_MS);
+        if (chunkIndex < chunkCount - 1) await wait(BITMAP_CHUNK_DELAY_MS);
       }
       const deadline = Date.now() + BITMAP_ACK_TIMEOUT_MS;
       while (!acknowledged && Date.now() < deadline) {
@@ -503,7 +555,7 @@ async function sendBitmapUdp(panel, payload, reason = 'sync') {
     try { socket?.close(); } catch {}
   }
 
-  const message = `Mapa Gran Santiago ${BITMAP_WIDTH}×${BITMAP_HEIGHT}`;
+  const message = BITMAP_SOURCES[panel.source]?.label || 'Mapa RGB565';
   const runtime = {
     at: new Date().toISOString(),
     ok: !error,
@@ -522,20 +574,21 @@ async function sendBitmapUdp(panel, payload, reason = 'sync') {
 }
 
 async function sendTextPanels(data) {
-  const enabled = config.panels.filter((panel) => panel.enabled && panel.source !== BITMAP_SOURCE);
+  const enabled = config.panels.filter((panel) => panel.enabled && !isBitmapSource(panel.source));
   await Promise.all(enabled.map((panel) => sendUdp(panel, renderPanelMessage(panel, data))));
 }
 
-async function sendBitmapPanels(payload, reason = 'sync') {
-  const enabled = config.panels.filter((panel) => panel.enabled && panel.source === BITMAP_SOURCE);
+async function sendBitmapPanels(source, payload, reason = 'sync') {
+  const enabled = config.panels.filter((panel) => panel.enabled && panel.source === source);
   await Promise.all(enabled.map((panel) => sendBitmapUdp(panel, payload, reason)));
 }
 
-function markBitmapPanelsFailed(error) {
+function markBitmapPanelsFailed(source, error) {
   const message = error?.message || 'No fue posible descargar el mapa desde la API.';
-  for (const panel of config.panels.filter((item) => item.enabled && item.source === BITMAP_SOURCE)) {
+  for (const panel of config.panels.filter((item) => item.enabled && item.source === source)) {
     panelRuntime.set(panel.id, {
-      at: new Date().toISOString(), ok: false, message: 'Mapa Gran Santiago 96×96', error: message
+      at: new Date().toISOString(), ok: false,
+      message: BITMAP_SOURCES[source]?.label || 'Mapa RGB565', error: message
     });
     addEvent({
       kind: 'udp', method: 'UDP MAPA', panelId: panel.id, panelName: panel.name,
@@ -550,16 +603,22 @@ async function poll() {
   polling = true;
   nextPollAt = null;
   broadcast();
-  const hasBitmapPanels = config.panels.some((panel) => panel.enabled && panel.source === BITMAP_SOURCE);
-  const [publicResultsResponse, summaryResponse, categoriesResponse, healthResponse, bitmapResponse] = await Promise.allSettled([
-    fetchLogged('/api/results.json', 'results'),
-    fetchLogged('/api/results', 'summary'),
-    fetchLogged('/api/results/categories', 'categories'),
-    fetchLogged('/health', 'health'),
-    hasBitmapPanels
-      ? fetchLogged(BITMAP_ENDPOINT, 'bitmap', 'buffer')
-      : Promise.resolve({ parsed: null, type: 'bitmap' })
+  const activeBitmapSources = [...new Set(config.panels
+    .filter((panel) => panel.enabled && isBitmapSource(panel.source))
+    .map((panel) => panel.source))];
+  const [coreResponses, bitmapResponses] = await Promise.all([
+    Promise.allSettled([
+      fetchLogged('/api/results.json', 'results'),
+      fetchLogged('/api/results', 'summary'),
+      fetchLogged('/api/results/categories', 'categories'),
+      fetchLogged('/health', 'health')
+    ]),
+    Promise.allSettled(activeBitmapSources.map(async (source) => {
+      const response = await fetchLogged(BITMAP_SOURCES[source].endpoint, `bitmap:${source}`, 'buffer');
+      return { source, frame: prepareBitmapFrame(source, response.parsed) };
+    }))
   ]);
+  const [publicResultsResponse, summaryResponse, categoriesResponse, healthResponse] = coreResponses;
   const sends = [];
   if (
     publicResultsResponse.status === 'fulfilled'
@@ -580,10 +639,14 @@ async function poll() {
       });
     }
   }
-  if (hasBitmapPanels && bitmapResponse.status === 'fulfilled') {
-    sends.push(sendBitmapPanels(bitmapResponse.value.parsed));
-  } else if (hasBitmapPanels) {
-    markBitmapPanelsFailed(bitmapResponse.reason);
+  for (let index = 0; index < activeBitmapSources.length; index += 1) {
+    const source = activeBitmapSources[index];
+    const response = bitmapResponses[index];
+    if (response.status === 'fulfilled') {
+      sends.push(sendBitmapPanels(source, response.value.frame));
+    } else {
+      markBitmapPanelsFailed(source, response.reason);
+    }
   }
   await Promise.all(sends);
   health = healthResponse.status === 'fulfilled'
@@ -874,9 +937,11 @@ async function handleApi(request, reply, url) {
   if (request.method === 'POST' && testMatch) {
     const panel = config.panels.find((item) => item.id === testMatch[1]);
     if (!panel) return json(reply, 404, { error: 'Panel no encontrado.' });
-    if (panel.source === BITMAP_SOURCE) {
-      const bitmap = await fetchLogged(BITMAP_ENDPOINT, 'bitmap', 'buffer');
-      const sent = await sendBitmapUdp(panel, bitmap.parsed, 'test');
+    if (isBitmapSource(panel.source)) {
+      const bitmapConfig = BITMAP_SOURCES[panel.source];
+      const bitmap = await fetchLogged(bitmapConfig.endpoint, `bitmap:${panel.source}`, 'buffer');
+      const frame = prepareBitmapFrame(panel.source, bitmap.parsed);
+      const sent = await sendBitmapUdp(panel, frame, 'test');
       return sent
         ? json(reply, 200, { ok: true })
         : json(reply, 502, { error: 'El panel no confirmó la recepción del mapa.' });

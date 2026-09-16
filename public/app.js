@@ -6,14 +6,19 @@ const sourceLabels = {
   total: 'Tiempo total', hospitalario: 'Hospitalario', tramites: 'Trámites',
   transporte: 'Transporte', vivienda: 'Vivienda', otro: 'Otro',
   latest_wait: 'Última espera', latest_testimony: 'Último testimonio',
-  map_gran_santiago: 'Mapa Gran Santiago 96×96', custom: 'Plantilla personalizada'
+  map_gran_santiago: 'Mapa Gran Santiago 96×96', map_chile: 'Mapa de Chile 16×96',
+  custom: 'Plantilla personalizada'
 };
 const categoryLabels = {
   hospitalario: 'Hospitalario', tramites: 'Trámites', transporte: 'Transporte',
   vivienda: 'Vivienda', otro: 'Otro'
 };
 const timedSources = ['total', 'hospitalario', 'tramites', 'transporte', 'vivienda', 'otro', 'latest_wait'];
-const bitmapSources = ['map_gran_santiago'];
+const bitmapSources = ['map_gran_santiago', 'map_chile'];
+const bitmapSourceDetails = {
+  map_gran_santiago: 'RGB565 · 96×96 · con confirmación',
+  map_chile: 'RGB565 · 16×96 · con confirmación'
+};
 const unitLabels = {
   auto: 'Unidad automática', minutes: 'Minutos', hours: 'Horas', days: 'Días', months: 'Meses', years: 'Años'
 };
@@ -126,7 +131,7 @@ function renderPanels() {
       <div class="route-source"><strong>${escapeHtml(sourceLabels[panel.source] || panel.source)}</strong>${escapeHtml(
         timedSources.includes(panel.source)
           ? panelFormatSummary(panel)
-          : bitmapSources.includes(panel.source) ? 'RGB565 · 96×96 · con confirmación'
+          : bitmapSources.includes(panel.source) ? bitmapSourceDetails[panel.source]
           : panel.source === 'custom' ? (panel.template || 'Plantilla personalizada') : 'Texto público'
       )}</div>
       <div class="panel-actions">
@@ -325,6 +330,11 @@ function updatePanelFormatFields() {
   $('#timeColorField').hidden = mode === 'label';
   $('#templateField').hidden = source !== 'custom';
   $('#bitmapField').hidden = !bitmapSources.includes(source);
+  if (bitmapSources.includes(source)) {
+    $('#bitmapField').textContent = source === 'map_chile'
+      ? 'Envía el mapa RGB565 de Chile 16×96 sin modificaciones al puerto UDP 5001 y espera la confirmación del panel.'
+      : 'Envía el mapa RGB565 de Gran Santiago 96×96 al puerto UDP 5001 y espera la confirmación del panel.';
+  }
 }
 
 function updateColorValues() {

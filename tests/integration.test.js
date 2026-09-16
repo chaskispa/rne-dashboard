@@ -36,6 +36,10 @@ const categoriesFixture = {
 };
 
 const bitmapFixture = Buffer.alloc(96 * 96 * 2, 0x5A);
+const chileBitmapFixture = Buffer.alloc(16 * 96 * 2);
+for (let index = 0; index < chileBitmapFixture.length; index += 1) {
+  chileBitmapFixture[index] = (index * 37) & 0xFF;
+}
 
 function listen(server) {
   return new Promise((resolve, reject) => {
@@ -105,6 +109,35 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
   });
   const bitmapPort = await new Promise((resolve) => bitmapUdp.bind(0, '127.0.0.1', () => resolve(bitmapUdp.address().port)));
 
+  let chileBitmapPayload = null;
+  let chileBitmapFrameId = null;
+  const chileBitmapChunks = new Map();
+  const chileBitmapUdp = dgram.createSocket('udp4');
+  chileBitmapUdp.on('message', (message, remote) => {
+    if (message.length < 8 || message.subarray(0, 4).toString() !== 'RGBU') return;
+    const frameId = message.readUInt16BE(4);
+    const chunkIndex = message[6];
+    const chunkCount = message[7];
+    if (chunkCount !== 3 || chunkIndex >= chunkCount) return;
+    if (chileBitmapFrameId !== frameId) {
+      chileBitmapFrameId = frameId;
+      chileBitmapChunks.clear();
+    }
+    chileBitmapChunks.set(chunkIndex, message.subarray(8));
+    if (chileBitmapChunks.size === chunkCount) {
+      chileBitmapPayload = Buffer.concat(
+        Array.from({ length: chunkCount }, (_, index) => chileBitmapChunks.get(index))
+      );
+      const acknowledgement = Buffer.concat([
+        Buffer.from('RGBU'), Buffer.from([frameId >> 8, frameId & 0xFF]), Buffer.from('OK')
+      ]);
+      chileBitmapUdp.send(acknowledgement, remote.port, remote.address);
+    }
+  });
+  const chileBitmapPort = await new Promise((resolve) => (
+    chileBitmapUdp.bind(0, '127.0.0.1', () => resolve(chileBitmapUdp.address().port))
+  ));
+
   const mockApi = http.createServer((request, reply) => {
     if (request.url === '/api/results/maps/gran-santiago.rgb565') {
       reply.writeHead(200, {
@@ -115,6 +148,17 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
         'x-byte-order': 'big-endian'
       });
       reply.end(bitmapFixture);
+      return;
+    }
+    if (request.url === '/api/results/maps/chile.rgb565') {
+      reply.writeHead(200, {
+        'content-type': 'application/octet-stream',
+        'content-length': chileBitmapFixture.length,
+        'x-bitmap-width': '16',
+        'x-bitmap-height': '96',
+        'x-byte-order': 'big-endian'
+      });
+      reply.end(chileBitmapFixture);
       return;
     }
     const payload = {
@@ -136,6 +180,7 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), 'rne-dashboard-test-'));
   await writeFile(path.join(dataDir, 'config.json'), JSON.stringify({
     bitmapPanelProvisioned: true,
+    chileBitmapPanelProvisioned: true,
     panels: [{
       id: 'test-panel', name: 'Panel test', host: '127.0.0.1', port: udpPort,
       source: 'total', template: '', unit: 'auto', displayMode: 'time', enabled: true
@@ -156,6 +201,9 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
     }, {
       id: 'test-panel-map', name: 'Panel map', host: '127.0.0.1', port: bitmapPort,
       source: 'map_gran_santiago', enabled: true
+    }, {
+      id: 'test-panel-map-chile', name: 'Panel Chile', host: '127.0.0.1', port: chileBitmapPort,
+      source: 'map_chile', enabled: true
     }]
   }));
 
@@ -172,6 +220,7 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
     child.kill('SIGTERM');
     udp.close();
     bitmapUdp.close();
+    chileBitmapUdp.close();
     mockApi.close();
     await rm(dataDir, { recursive: true, force: true });
   });
@@ -179,7 +228,7 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
   const match = await waitForOutput(child, /127\.0\.0\.1:(\d+)/);
   const dashboardPort = Number(match[1]);
 
-  for (let attempt = 0; attempt < 80 && (udpMessages.length < 5 || !bitmapAcknowledged); attempt += 1) {
+  for (let attempt = 0; attempt < 80 && (udpMessages.length < 5 || !bitmapAcknowledged || !chileBitmapPayload); attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   assert.deepEqual(udpMessages.sort(), [
@@ -189,6 +238,9 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
   assert.ok(bitmapPayload);
   assert.equal(bitmapPayload.length, 96 * 96 * 2);
   assert.equal(Buffer.compare(bitmapPayload, bitmapFixture), 0);
+  assert.ok(chileBitmapPayload);
+  assert.equal(chileBitmapPayload.length, 16 * 96 * 2);
+  assert.equal(Buffer.compare(chileBitmapPayload, chileBitmapFixture), 0);
   assert.equal(bitmapAttempts.length, 2);
   for (const attempt of bitmapAttempts) {
     assert.deepEqual(attempt.map((chunk) => chunk.chunkIndex), Array.from({ length: 18 }, (_, index) => index));
@@ -207,9 +259,10 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
   assert.equal(state.results.unidad_tiempo, 'minutos');
   assert.equal(state.results.version, 3);
   assert.equal(state.health.status, 'ok');
-  assert.equal(state.events.filter((event) => event.kind === 'api').length, 5);
-  assert.equal(state.events.filter((event) => event.kind === 'udp').length, 6);
+  assert.equal(state.events.filter((event) => event.kind === 'api').length, 6);
+  assert.equal(state.events.filter((event) => event.kind === 'udp').length, 7);
   assert.equal(state.panelRuntime['test-panel-map'].ok, true);
+  assert.equal(state.panelRuntime['test-panel-map-chile'].ok, true);
   const coloredPanel = state.config.panels.find((panel) => panel.id === 'test-panel-colors');
   assert.equal(coloredPanel.labelColor, '00FF00');
   assert.equal(coloredPanel.timeColor, 'FF0000');
@@ -225,6 +278,7 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
   const page = await pageResponse.text();
   assert.match(page, /CHASKI · Control RNE/);
   assert.match(page, /Usar colores RGB/);
+  assert.match(page, /Mapa de Chile 16×96/);
 
   const logoResponse = await fetch(`http://127.0.0.1:${dashboardPort}/assets/chaski-mark.svg`);
   assert.equal(logoResponse.status, 200);
