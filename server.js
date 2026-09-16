@@ -273,7 +273,11 @@ function contextFromResults(data) {
   const area = data?.tiempo_por_area || {};
   return {
     total_minutes: data?.tiempo_total ?? 0,
-    total_hours: String(Math.round((data?.tiempo_total ?? 0) / 60)),
+    total_hours: new Intl.NumberFormat('es-CL', {
+      useGrouping: true,
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 1
+    }).format((data?.tiempo_total ?? 0) / 60),
     hospitalario: area.hospitalario ?? 0,
     tramites: area.tramites ?? 0,
     transporte: area.transporte ?? 0,
@@ -307,7 +311,7 @@ function formatDuration(minutes, requestedUnit = 'auto') {
     years: 60 * 24 * 365
   };
   const rawValue = minutes / divisors[unit];
-  const value = Math.round(rawValue);
+  const value = Math.round((rawValue + Number.EPSILON) * 10) / 10;
   const labels = {
     minutes: 'MIN',
     hours: 'H',
@@ -318,7 +322,8 @@ function formatDuration(minutes, requestedUnit = 'auto') {
   return {
     value: new Intl.NumberFormat('es-CL', {
       useGrouping: true,
-      maximumFractionDigits: 0
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 1
     }).format(value),
     unit: labels[unit]
   };

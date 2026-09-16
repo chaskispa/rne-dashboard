@@ -143,6 +143,9 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
       id: 'test-panel-minutes', name: 'Panel minutes', host: '127.0.0.1', port: udpPort,
       source: 'total', template: '', unit: 'minutes', displayMode: 'time', enabled: true
     }, {
+      id: 'test-panel-hours', name: 'Panel hours', host: '127.0.0.1', port: udpPort,
+      source: 'total', template: '', unit: 'hours', displayMode: 'time', enabled: true
+    }, {
       id: 'test-panel-label', name: 'Panel label', host: '127.0.0.1', port: udpPort,
       source: 'tramites', template: '', unit: 'auto', displayMode: 'label',
       colorsEnabled: true, labelColor: '00ff00', enabled: true
@@ -176,11 +179,12 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
   const match = await waitForOutput(child, /127\.0\.0\.1:(\d+)/);
   const dashboardPort = Number(match[1]);
 
-  for (let attempt = 0; attempt < 80 && (udpMessages.length < 4 || !bitmapAcknowledged); attempt += 1) {
+  for (let attempt = 0; attempt < 80 && (udpMessages.length < 5 || !bitmapAcknowledged); attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   assert.deepEqual(udpMessages.sort(), [
-    '2 DÍAS', '2.835 MIN', '[00FF00]TRÁMITES', '[00FF00]TRÁMITES [FF0000]2 DÍAS'
+    '2 DÍAS', '2.835 MIN', '47,3 H',
+    '[00FF00]TRÁMITES', '[00FF00]TRÁMITES [FF0000]2 DÍAS'
   ].sort());
   assert.ok(bitmapPayload);
   assert.equal(bitmapPayload.length, 96 * 96 * 2);
@@ -204,7 +208,7 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
   assert.equal(state.results.version, 3);
   assert.equal(state.health.status, 'ok');
   assert.equal(state.events.filter((event) => event.kind === 'api').length, 5);
-  assert.equal(state.events.filter((event) => event.kind === 'udp').length, 5);
+  assert.equal(state.events.filter((event) => event.kind === 'udp').length, 6);
   assert.equal(state.panelRuntime['test-panel-map'].ok, true);
   const coloredPanel = state.config.panels.find((panel) => panel.id === 'test-panel-colors');
   assert.equal(coloredPanel.labelColor, '00FF00');
