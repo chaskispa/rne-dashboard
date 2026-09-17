@@ -123,6 +123,7 @@ fi
 install -d -o root -g root -m 0755 "${APP_DIR}"
 install -d -o "${SERVICE_USER}" -g "${SERVICE_USER}" -m 0750 "${DATA_DIR}"
 install -m 0644 "${SOURCE_DIR}/server.js" "${APP_DIR}/server.js"
+install -m 0644 "${SOURCE_DIR}/printer-service.js" "${APP_DIR}/printer-service.js"
 install -m 0644 "${SOURCE_DIR}/package.json" "${APP_DIR}/package.json"
 install -m 0755 "${SOURCE_DIR}/send_bitmap_udp.py" "${APP_DIR}/send_bitmap_udp.py"
 install -d -o root -g root -m 0755 "${APP_DIR}/public"
@@ -186,6 +187,9 @@ Environment=HOST=0.0.0.0
 Environment=RNE_DATA_DIR=${DATA_DIR}
 Environment=RNE_ADMIN_TOKEN_FILE=${DATA_DIR}/admin-token
 Environment=RNE_NETWORK_HELPER=${NETWORK_HELPER}
+Environment=OKI_PRINTER_HOST=192.168.100.10
+Environment=OKI_PRINTER_PORT=5005
+Environment=OKI_PRINTER_STATUS_URL=http://192.168.100.10:8080/healthz
 ExecStart=${NODE_BIN} ${APP_DIR}/server.js
 Restart=on-failure
 RestartSec=5
@@ -217,7 +221,7 @@ fi
 info "Instalación completada"
 printf 'Dashboard: http://%s:%s\n' "${device_ip}" "${DASHBOARD_PORT}"
 printf 'API RNE:   https://registronacionaldeespera.cl\n'
-printf 'Clave de administración de red: %s\n' "${admin_token}"
+printf 'Clave de administración (red e impresora): %s\n' "${admin_token}"
 printf '\nComandos útiles:\n'
 printf '  Estado:  sudo systemctl status %s\n' "${APP_NAME}"
 printf '  Logs:    sudo journalctl -u %s -f\n' "${APP_NAME}"

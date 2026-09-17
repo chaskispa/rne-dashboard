@@ -14,6 +14,9 @@ Environment=HOST=0.0.0.0
 Environment=RNE_DATA_DIR=/var/lib/rne-dashboard
 Environment=RNE_ADMIN_TOKEN_FILE=/var/lib/rne-dashboard/admin-token
 Environment=RNE_NETWORK_HELPER=/usr/local/lib/rne-dashboard/network-helper
+Environment=OKI_PRINTER_HOST=192.168.100.10
+Environment=OKI_PRINTER_PORT=5005
+Environment=OKI_PRINTER_STATUS_URL=http://192.168.100.10:8080/healthz
 ExecStart=/usr/bin/node /opt/rne-dashboard/server.js
 Restart=on-failure
 RestartSec=5

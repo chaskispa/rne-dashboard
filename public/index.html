@@ -68,10 +68,53 @@
           <div id="panelList" class="panel-list"></div>
         </section>
 
+        <section class="panel-card printer-card" id="printerPanel" aria-labelledby="printerTitle">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">[02] IMPRESIÓN OKI</p>
+              <h2 id="printerTitle">OKI Microline 320</h2>
+            </div>
+            <a class="button secondary" id="printerControlLink" href="http://192.168.100.10:8080/" target="_blank" rel="noreferrer">Abrir control OKI</a>
+          </div>
+          <div class="printer-status-row" aria-live="polite">
+            <span class="printer-state" id="printerState" data-state="server_offline">Consultando…</span>
+            <span class="printer-state-detail" id="printerStateDetail">Conectando con el servidor de impresión</span>
+          </div>
+          <div class="printer-layout">
+            <div class="printer-monitor">
+              <dl class="printer-facts">
+                <div><dt>Dispositivo</dt><dd id="printerDevice">—</dd></div>
+                <div><dt>Cola</dt><dd id="printerQueue">—</dd></div>
+                <div><dt>Trabajo actual</dt><dd id="printerCurrentJob">—</dd></div>
+                <div><dt>Último resultado</dt><dd id="printerLastResult">—</dd></div>
+                <div><dt>Impresos</dt><dd id="printerSuccessCount">0</dd></div>
+                <div><dt>Intentos fallidos</dt><dd id="printerFailureCount">0</dd></div>
+                <div><dt>Descartados</dt><dd id="printerDroppedCount">0</dd></div>
+                <div><dt>Uptime</dt><dd id="printerUptime">—</dd></div>
+              </dl>
+              <p class="section-note printer-note">Los trabajos pendientes se guardan en este dashboard y se reenvían automáticamente cuando el servidor OKI vuelve a estar disponible. “Enviado” confirma el datagrama UDP, no la impresión física.</p>
+            </div>
+            <form id="printerForm" class="printer-form">
+              <label>Texto para imprimir
+                <textarea id="printerText" rows="11" spellcheck="true" placeholder="Escribe texto plano. Los saltos de línea y espacios se conservan."></textarea>
+              </label>
+              <div class="printer-counter-row"><span>UTF-8 · máximo 8.192 bytes</span><output id="printerByteCount">0 / 8.192 bytes</output></div>
+              <label>Clave de administración
+                <input id="printerAdminKey" type="password" autocomplete="current-password" placeholder="Mostrada al instalar">
+              </label>
+              <p class="form-error" id="printerError" role="alert"></p>
+              <div class="printer-actions">
+                <button class="button secondary" id="printerTestButton" type="button">Test Print</button>
+                <button class="button primary" id="printerSubmitButton" type="submit" disabled>Imprimir texto</button>
+              </div>
+            </form>
+          </div>
+        </section>
+
         <section class="panel-card" aria-labelledby="lanTitle">
           <div class="section-head">
             <div>
-              <p class="eyebrow">[02] MONITOR LAN</p>
+              <p class="eyebrow">[03] MONITOR LAN</p>
               <h2 id="lanTitle">Dispositivos detectados <span class="title-count" id="lanCount">0</span></h2>
             </div>
             <div class="section-actions">
@@ -92,7 +135,7 @@
         <section class="panel-card" aria-labelledby="areasTitle">
           <div class="section-head compact">
             <div>
-              <p class="eyebrow">[03] DISTRIBUCIÓN</p>
+              <p class="eyebrow">[04] DISTRIBUCIÓN</p>
               <h2 id="areasTitle">Tiempo por área</h2>
             </div>
             <span class="timestamp" id="dataTimestamp">Sin datos</span>
@@ -111,6 +154,7 @@
             <button class="filter active" data-filter="all" type="button">Todo</button>
             <button class="filter" data-filter="api" type="button">API</button>
             <button class="filter" data-filter="udp" type="button">UDP</button>
+            <button class="filter" data-filter="printer" type="button">OKI</button>
           </div>
         </div>
         <div id="activityList" class="activity-list" aria-live="polite"></div>

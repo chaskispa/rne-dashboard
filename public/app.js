@@ -1,7 +1,18 @@
+import {
+  PRINTER_MAX_BYTES,
+  buildTestPrintText,
+  printSubmissionDisabled,
+  printerStatusView,
+  utf8ByteLength
+} from './printer-ui.js';
+
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 
-const state = { data: null, network: null, filter: 'all', tick: null, toastTimer: null };
+const state = {
+  data: null, network: null, printer: null, printerSending: false,
+  printerTimer: null, filter: 'all', tick: null, toastTimer: null
+};
 const sourceLabels = {
   total: 'Tiempo total', hospitalario: 'Hospitalario', tramites: 'Trámites',
   transporte: 'Transporte', vivienda: 'Vivienda', otro: 'Otro',
@@ -203,7 +214,7 @@ function renderEvents() {
     return;
   }
   list.innerHTML = events.slice(0, 40).map((event) => {
-    const result = event.kind === 'udp' ? (event.ok ? 'ENVIADO' : 'ERROR')
+    const result = ['udp', 'printer'].includes(event.kind) ? (event.ok ? 'ENVIADO' : 'ERROR')
       : event.kind === 'api' ? (event.status || 'ERROR') : 'OK';
     return `<article class="event ${event.kind}">
       <span class="event-method">${escapeHtml(event.method)}</span>
@@ -213,10 +224,91 @@ function renderEvents() {
   }).join('');
 }
 
-function adminHeaders() {
-  const key = $('#networkAdminKey').value.trim();
-  if (key) sessionStorage.setItem('rneNetworkAdminKey', key);
+function storedAdminKey() {
+  return sessionStorage.getItem('rneAdminKey') || sessionStorage.getItem('rneNetworkAdminKey') || '';
+}
+
+function adminHeaders(value) {
+  const key = String(value ?? $('#networkAdminKey')?.value ?? storedAdminKey()).trim();
+  if (key) {
+    sessionStorage.setItem('rneAdminKey', key);
+    sessionStorage.setItem('rneNetworkAdminKey', key);
+  }
   return { 'x-rne-admin-token': key };
+}
+
+function formatUptime(seconds) {
+  const value = Number(seconds);
+  if (!Number.isFinite(value)) return '—';
+  const days = Math.floor(value / 86400);
+  const hours = Math.floor((value % 86400) / 3600);
+  const minutes = Math.floor((value % 3600) / 60);
+  return days ? `${days} d ${hours} h` : hours ? `${hours} h ${minutes} min` : `${minutes} min`;
+}
+
+function renderPrinterStatus() {
+  const printer = state.printer;
+  const view = printerStatusView(printer);
+  const stateNode = $('#printerState');
+  stateNode.textContent = view.label;
+  stateNode.dataset.state = printer?.state || 'server_offline';
+  $('#printerStateDetail').textContent = printer?.error || view.detail;
+  $('#printerDevice').textContent = printer?.devicePath || '—';
+  const serverQueue = printer?.reachable ? `${printer.queueDepth} / ${printer.queueCapacity}` : 'offline';
+  $('#printerQueue').textContent = `Servidor ${serverQueue} · Dashboard ${printer?.dashboardQueueDepth ?? 0}`;
+  $('#printerCurrentJob').textContent = printer?.currentJob?.description || 'Ninguno';
+  $('#printerLastResult').textContent = printer?.lastResult?.outcome === 'succeeded'
+    ? 'Correcto' : printer?.lastResult?.message || 'Sin resultados';
+  $('#printerSuccessCount').textContent = printer?.successfulJobs ?? 0;
+  $('#printerFailureCount').textContent = printer?.failedAttempts ?? 0;
+  $('#printerDroppedCount').textContent = printer?.droppedJobs ?? 0;
+  $('#printerUptime').textContent = printer?.reachable ? formatUptime(printer.uptimeSeconds) : '—';
+  if (printer?.controlUrl) $('#printerControlLink').href = printer.controlUrl;
+}
+
+function updatePrinterForm() {
+  const text = $('#printerText').value;
+  const bytes = utf8ByteLength(text);
+  const counter = $('#printerByteCount');
+  counter.textContent = `${bytes.toLocaleString('es-CL')} / ${PRINTER_MAX_BYTES.toLocaleString('es-CL')} bytes`;
+  counter.classList.toggle('over-limit', bytes > PRINTER_MAX_BYTES);
+  $('#printerSubmitButton').disabled = printSubmissionDisabled(text, state.printerSending);
+  $('#printerTestButton').disabled = state.printerSending;
+  $('#printerSubmitButton').textContent = state.printerSending ? 'Enviando…' : 'Imprimir texto';
+}
+
+async function refreshPrinterStatus() {
+  clearTimeout(state.printerTimer);
+  if (document.hidden) return;
+  try {
+    state.printer = await request('/api/printer/status');
+  } catch (error) {
+    state.printer = { state: 'server_offline', reachable: false, error: error.message };
+  }
+  renderPrinterStatus();
+  state.printerTimer = setTimeout(refreshPrinterStatus, 8_000);
+}
+
+async function submitPrinterText(text) {
+  if (state.printerSending) return;
+  state.printerSending = true;
+  $('#printerError').textContent = '';
+  updatePrinterForm();
+  try {
+    const result = await request('/api/printer/print', {
+      method: 'POST',
+      headers: adminHeaders($('#printerAdminKey').value),
+      body: JSON.stringify({ text })
+    });
+    toast(result.notice || 'Trabajo enviado a la Raspberry Pi');
+    await refreshPrinterStatus();
+  } catch (error) {
+    $('#printerError').textContent = error.message;
+    toast(`Error de impresión: ${error.message}`);
+  } finally {
+    state.printerSending = false;
+    updatePrinterForm();
+  }
 }
 
 function selectNetworkConnection() {
@@ -262,7 +354,7 @@ function renderNetwork() {
 }
 
 async function openNetworkDialog() {
-  $('#networkAdminKey').value = sessionStorage.getItem('rneNetworkAdminKey') || '';
+  $('#networkAdminKey').value = storedAdminKey();
   $('#networkError').textContent = '';
   $('#wifiError').textContent = '';
   $('#networkStatus').textContent = 'Consultando interfaces…';
@@ -358,6 +450,16 @@ $('#panelColorsEnabled').addEventListener('change', updatePanelFormatFields);
 $('#panelLabelColor').addEventListener('input', updateColorValues);
 $('#panelTimeColor').addEventListener('input', updateColorValues);
 $('#networkButton').addEventListener('click', openNetworkDialog);
+$('#printerText').addEventListener('input', updatePrinterForm);
+$('#printerForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!printSubmissionDisabled($('#printerText').value, state.printerSending)) {
+    await submitPrinterText($('#printerText').value);
+  }
+});
+$('#printerTestButton').addEventListener('click', async () => {
+  await submitPrinterText(buildTestPrintText(new Date()));
+});
 $$('[data-close-dialog]').forEach((button) => button.addEventListener('click', () => button.closest('dialog').close()));
 $$('.dialog').forEach((dialog) => dialog.addEventListener('click', (event) => {
   if (event.target === dialog) dialog.close();
@@ -589,6 +691,15 @@ stream.addEventListener('update', refresh);
 stream.addEventListener('connected', () => $('#liveState').lastElementChild.textContent = 'Conectado');
 stream.onerror = () => $('#liveState').lastElementChild.textContent = 'Reconectando';
 
+$('#printerAdminKey').value = storedAdminKey();
+updatePrinterForm();
 await refresh();
+await refreshPrinterStatus();
 registerWebMcpTools();
 state.tick = setInterval(updateCountdown, 1000);
+
+document.addEventListener('visibilitychange', () => {
+  clearTimeout(state.printerTimer);
+  if (!document.hidden) void refreshPrinterStatus();
+});
+window.addEventListener('pagehide', () => clearTimeout(state.printerTimer));

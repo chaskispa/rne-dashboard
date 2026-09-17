@@ -10,7 +10,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "check": "node --check server.js && node --check public/app.js",
-    "test": "node --test tests/integration.test.js"
+    "check": "node --check server.js && node --check printer-service.js && node --check public/app.js && node --check public/printer-ui.js",
+    "test": "node --test tests/*.test.js"
   }
 }

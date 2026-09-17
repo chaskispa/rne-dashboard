@@ -10,15 +10,26 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
+import {
+  PrinterJobError,
+  encodePrinterJob,
+  fetchPrinterStatus,
+  formatSubmissionPrintJob,
+  printerConfigFromEnv,
+  sendPrinterJob
+} from './printer-service.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, 'public');
 const dataDir = path.resolve(process.env.RNE_DATA_DIR || path.join(__dirname, 'data'));
 const configPath = path.join(dataDir, 'config.json');
+const printedSubmissionsPath = path.join(dataDir, 'printed-submissions.json');
+const printerQueuePath = path.join(dataDir, 'printer-queue.json');
 const host = process.env.HOST || '0.0.0.0';
 const port = Number(process.env.PORT || 4173);
 const POLL_INTERVAL_MS = 30_000;
 const LAN_SCAN_INTERVAL_MS = 60_000;
+const PRINTER_RETRY_INTERVAL_MS = 8_000;
 const MAX_EVENTS = 400;
 const MAX_BODY_BYTES = 32 * 1024;
 const execFileAsync = promisify(execFile);
@@ -28,6 +39,8 @@ const PRODUCTION_API_BASE_URL = 'https://registronacionaldeespera.cl';
 const API_BASE_URL = process.env.NODE_ENV === 'test' && process.env.RNE_TEST_API_BASE_URL
   ? process.env.RNE_TEST_API_BASE_URL
   : PRODUCTION_API_BASE_URL;
+const OKI_PRINTER = printerConfigFromEnv();
+const OKI_CONTROL_URL = new URL('/', OKI_PRINTER.statusUrl).toString();
 const CATEGORIES = ['hospitalario', 'tramites', 'transporte', 'vivienda', 'otro'];
 const GRAN_SANTIAGO_BITMAP_SOURCE = 'map_gran_santiago';
 const BITMAP_SOURCES = {
@@ -87,8 +100,13 @@ let nextPollAt = null;
 let polling = false;
 let timer = null;
 let lanTimer = null;
+let printerRetryTimer = null;
 let events = [];
 let adminToken = '';
+let printedSubmissionState = { initialized: false, ids: new Set() };
+let printerQueue = [];
+let printerQueueProcessing = false;
+let automaticPrinterQueue = Promise.resolve();
 let lanScan = { available: null, scanning: false, lastScanAt: null, devices: [], error: null };
 const panelRuntime = new Map();
 const sseClients = new Set();
@@ -193,6 +211,55 @@ async function loadAdminToken() {
   }
 }
 
+async function loadPrintedSubmissionState() {
+  try {
+    const saved = JSON.parse(await readFile(printedSubmissionsPath, 'utf8'));
+    printedSubmissionState = {
+      initialized: saved.initialized === true,
+      ids: new Set(Array.isArray(saved.printed_ids) ? saved.printed_ids.map(String) : [])
+    };
+  } catch (error) {
+    if (error.code !== 'ENOENT') console.error('Could not load printed submission IDs:', error.message);
+    printedSubmissionState = { initialized: false, ids: new Set() };
+  }
+}
+
+async function savePrintedSubmissionState() {
+  const temporaryPath = `${printedSubmissionsPath}.tmp`;
+  const payload = {
+    version: 1,
+    initialized: true,
+    printed_ids: [...printedSubmissionState.ids]
+  };
+  await writeFile(temporaryPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+  await rename(temporaryPath, printedSubmissionsPath);
+}
+
+async function loadPrinterQueue() {
+  try {
+    const saved = JSON.parse(await readFile(printerQueuePath, 'utf8'));
+    printerQueue = Array.isArray(saved.jobs) ? saved.jobs.filter((job) => (
+      job && typeof job.id === 'string' && typeof job.text === 'string'
+    )).map((job) => ({
+      id: job.id,
+      text: job.text,
+      sender: String(job.sender || 'desconocido'),
+      reason: String(job.reason || 'manual'),
+      submissionId: typeof job.submissionId === 'string' ? job.submissionId : null,
+      createdAt: typeof job.createdAt === 'string' ? job.createdAt : new Date().toISOString()
+    })) : [];
+  } catch (error) {
+    if (error.code !== 'ENOENT') console.error('Could not load printer queue:', error.message);
+    printerQueue = [];
+  }
+}
+
+async function savePrinterQueue() {
+  const temporaryPath = `${printerQueuePath}.tmp`;
+  await writeFile(temporaryPath, `${JSON.stringify({ version: 1, jobs: printerQueue }, null, 2)}\n`, 'utf8');
+  await rename(temporaryPath, printerQueuePath);
+}
+
 function hasAdminAccess(request) {
   if (!adminToken) return false;
   const supplied = String(request.headers['x-rne-admin-token'] || '');
@@ -211,6 +278,136 @@ function addEvent(event) {
   events.unshift({ id: randomUUID(), at: new Date().toISOString(), ...event });
   if (events.length > MAX_EVENTS) events.length = MAX_EVENTS;
   broadcast();
+}
+
+async function sendConfiguredPrinterJob(text, sender, reason = 'manual') {
+  const started = performance.now();
+  try {
+    const result = await sendPrinterJob(text, {
+      host: OKI_PRINTER.host,
+      port: OKI_PRINTER.port,
+      sender,
+      timeoutMs: 1_500
+    });
+    addEvent({
+      kind: 'printer', method: 'PRINT', target: result.destination, ok: true,
+      status: null, durationMs: Math.round(performance.now() - started),
+      bytes: result.bytes, reason
+    });
+    return result;
+  } catch (error) {
+    if (error instanceof PrinterJobError) {
+      console.error(`OKI print job rejected bytes=${Buffer.byteLength(typeof text === 'string' ? text : '', 'utf8')} destination=${OKI_PRINTER.host}:${OKI_PRINTER.port} sender=${sender} error=${error.message}`);
+    }
+    addEvent({
+      kind: 'printer', method: 'PRINT', target: `${OKI_PRINTER.host}:${OKI_PRINTER.port}`,
+      ok: false, status: null, durationMs: Math.round(performance.now() - started),
+      bytes: Buffer.byteLength(typeof text === 'string' ? text : '', 'utf8'), reason,
+      error: error.message
+    });
+    throw error;
+  }
+}
+
+async function enqueuePrinterJob({ text, sender, reason = 'manual', submissionId = null }) {
+  const payload = encodePrinterJob(text);
+  if (submissionId && printedSubmissionState.ids.has(submissionId)) {
+    return { id: null, bytes: payload.length, queued: false, alreadyProcessed: true };
+  }
+  if (submissionId) {
+    const existing = printerQueue.find((job) => job.submissionId === submissionId);
+    if (existing) return { id: existing.id, bytes: payload.length, queued: true, alreadyQueued: true };
+  }
+  const job = {
+    id: randomUUID(), text, sender, reason, submissionId,
+    createdAt: new Date().toISOString()
+  };
+  printerQueue.push(job);
+  await savePrinterQueue();
+  console.info(`OKI print job queued bytes=${payload.length} destination=${OKI_PRINTER.host}:${OKI_PRINTER.port} sender=${sender} queue_depth=${printerQueue.length}`);
+  addEvent({
+    kind: 'printer', method: 'QUEUE', target: `${OKI_PRINTER.host}:${OKI_PRINTER.port}`,
+    ok: true, status: null, durationMs: 0, bytes: payload.length, reason
+  });
+  return { id: job.id, bytes: payload.length, queued: true };
+}
+
+function printerCanAcceptJobs(status) {
+  return status.reachable && status.healthy && status.deviceExists && status.deviceWritable;
+}
+
+async function processPrinterQueue() {
+  if (printerQueueProcessing || !printerQueue.length) return;
+  printerQueueProcessing = true;
+  broadcast();
+  try {
+    const status = await fetchPrinterStatus(OKI_PRINTER.statusUrl, { timeoutMs: 2_000 });
+    if (!printerCanAcceptJobs(status)) return;
+    const availableSlots = status.queueCapacity > 0
+      ? Math.max(0, status.queueCapacity - status.queueDepth)
+      : 1;
+    let sent = 0;
+    while (printerQueue.length && sent < availableSlots) {
+      const job = printerQueue[0];
+      if (job.submissionId && printedSubmissionState.ids.has(job.submissionId)) {
+        printerQueue.shift();
+        await savePrinterQueue();
+        continue;
+      }
+      try {
+        await sendConfiguredPrinterJob(job.text, job.sender, job.reason);
+      } catch {
+        return;
+      }
+      if (job.submissionId) {
+        printedSubmissionState.ids.add(job.submissionId);
+        await savePrintedSubmissionState();
+      }
+      printerQueue.shift();
+      await savePrinterQueue();
+      sent += 1;
+    }
+  } finally {
+    printerQueueProcessing = false;
+    broadcast();
+  }
+}
+
+async function retryPrinterQueue() {
+  clearTimeout(printerRetryTimer);
+  try {
+    await processPrinterQueue();
+  } catch (error) {
+    console.error(`OKI printer queue retry error=${error.message}`);
+  } finally {
+    printerRetryTimer = setTimeout(retryPrinterQueue, PRINTER_RETRY_INTERVAL_MS);
+  }
+}
+
+async function printNewSubmissions(entries) {
+  const submissions = Array.isArray(entries)
+    ? entries.filter((entry) => typeof entry?.id === 'string' && entry.id.trim())
+    : [];
+  if (!printedSubmissionState.initialized) {
+    for (const entry of submissions) printedSubmissionState.ids.add(entry.id);
+    printedSubmissionState.initialized = true;
+    await savePrintedSubmissionState();
+    console.info(`OKI print baseline saved submissions=${submissions.length}`);
+    return;
+  }
+
+  for (const entry of submissions) {
+    if (printedSubmissionState.ids.has(entry.id) || printerQueue.some((job) => job.submissionId === entry.id)) continue;
+    try {
+      const text = formatSubmissionPrintJob(entry);
+      await enqueuePrinterJob({
+        text, sender: `rne-auto:${entry.id}`, reason: 'new-submission', submissionId: entry.id
+      });
+      void processPrinterQueue();
+    } catch (error) {
+      console.error(`OKI automatic print pending submission=${entry.id} error=${error.message}`);
+    }
+  }
 }
 
 function publicState() {
@@ -632,6 +829,9 @@ async function poll() {
         categoriesResponse.value.parsed
       );
       sends.push(sendTextPanels(results));
+      automaticPrinterQueue = automaticPrinterQueue
+        .then(() => printNewSubmissions(results.entradas))
+        .catch((error) => console.error(`OKI automatic print queue error=${error.message}`));
     } catch (error) {
       addEvent({
         kind: 'api', method: 'NORMALIZE', target: 'resultados', status: null,
@@ -888,6 +1088,43 @@ async function handleApi(request, reply, url) {
     return json(reply, 200, await getNetworkState());
   }
 
+  if (request.method === 'GET' && url.pathname === '/api/printer/status') {
+    const status = await fetchPrinterStatus(OKI_PRINTER.statusUrl, { timeoutMs: 2_000 });
+    if (printerCanAcceptJobs(status) && printerQueue.length) void processPrinterQueue();
+    const state = printerCanAcceptJobs(status) && printerQueue.length ? 'busy' : status.state;
+    return json(reply, 200, {
+      ...status,
+      state,
+      dashboardQueueDepth: printerQueue.length,
+      dashboardQueueProcessing: printerQueueProcessing,
+      destination: `${OKI_PRINTER.host}:${OKI_PRINTER.port}`,
+      controlUrl: OKI_CONTROL_URL
+    });
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/printer/print') {
+    if (!hasAdminAccess(request)) return json(reply, 401, { error: 'Clave de administración incorrecta.' });
+    const body = await readBody(request);
+    const sender = `dashboard:${request.socket.remoteAddress || 'desconocido'}`;
+    try {
+      const queued = await enqueuePrinterJob({ text: body.text, sender, reason: 'manual' });
+      await processPrinterQueue();
+      const pending = queued.id ? printerQueue.some((job) => job.id === queued.id) : false;
+      return json(reply, pending ? 202 : 200, {
+        success: true,
+        queued: pending,
+        message: pending ? 'Print job queued' : 'Print job sent',
+        bytes: queued.bytes,
+        notice: pending
+          ? 'La impresora no está disponible. El trabajo quedó guardado y se enviará automáticamente.'
+          : 'El trabajo fue enviado a la Raspberry Pi por UDP; esto no garantiza la impresión física.'
+      });
+    } catch (error) {
+      const statusCode = error instanceof PrinterJobError ? error.statusCode : 502;
+      return json(reply, statusCode, { error: error.message });
+    }
+  }
+
   if (request.method === 'POST' && url.pathname === '/api/lan/scan') {
     if (!lanScan.scanning) void scanLan();
     return json(reply, 202, { ok: true, scanning: true });
@@ -1022,7 +1259,7 @@ function serveStatic(request, reply, url) {
   stream.on('error', () => json(reply, 404, { error: 'No encontrado.' }));
 }
 
-await Promise.all([loadConfig(), loadAdminToken()]);
+await Promise.all([loadConfig(), loadAdminToken(), loadPrintedSubmissionState(), loadPrinterQueue()]);
 
 const server = http.createServer(async (request, reply) => {
   try {
@@ -1040,12 +1277,14 @@ server.listen(port, host, () => {
   const address = server.address();
   console.log(`RNE dashboard listening on http://${host}:${address.port}`);
   void poll();
+  void retryPrinterQueue();
   if (process.env.NODE_ENV !== 'test') void scanLan();
 });
 
 function shutdown() {
   clearTimeout(timer);
   clearTimeout(lanTimer);
+  clearTimeout(printerRetryTimer);
   for (const client of sseClients) client.end();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(1), 5_000).unref();

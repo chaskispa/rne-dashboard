@@ -1,15 +1,16 @@
 # RNE Panel Dashboard
 
 Centro de control local para una Raspberry Pi 3. Consulta la API del Registro
-Nacional de Espera cada 30 segundos, muestra el tráfico de las consultas y
-envía texto a controladores `RGB_ETHERNET` mediante UDP.
+Nacional de Espera cada 30 segundos, muestra el tráfico de las consultas,
+envía texto a controladores `RGB_ETHERNET` mediante UDP y administra una
+impresora OKI Microline 320 conectada a un servidor de impresión en la LAN.
 
 ## Qué hace
 
 - Consulta `GET /api/results`, `GET /api/results/categories`,
   `GET /api/results.json` y `GET /health` cada 30 segundos.
 - Muestra todas las solicitudes que este servicio realiza a la API. Mantiene
-  en memoria las últimas 400 consultas, envíos UDP y
+  en memoria las últimas 400 consultas, envíos UDP, trabajos de impresión y
   cambios de configuración.
 - Permite crear, editar, pausar, probar y eliminar rutas hacia paneles.
 - Permite consultar NetworkManager, configurar DHCP o una IP estática y
@@ -22,6 +23,8 @@ envía texto a controladores `RGB_ETHERNET` mediante UDP.
 - Guarda las rutas de paneles en `data/config.json` mediante escritura atómica.
   El archivo no se versiona.
 - Envía texto UTF-8 al puerto UDP 5000, compatible con `../RGB_ETHERNET`.
+- Envía trabajos de texto UTF-8 a la OKI y autoimprime cada registro nuevo una
+  sola vez, con los datos del registro primero y el testimonio después.
 
 UDP no incluye confirmación del receptor. Por eso «Enviado» significa que el
 sistema operativo aceptó el datagrama, no que el panel confirmó su recepción.
@@ -37,14 +40,25 @@ npm start
 Abre `http://IP_DE_LA_RASPBERRY:4173`. Por defecto, se consulta la API pública
 fija en `https://registronacionaldeespera.cl`.
 
-El panel de administración no tiene autenticación y está pensado para una red
-local confiable. No expongas el puerto 4173 directamente a Internet.
+El dashboard está pensado para una red local confiable. Los cambios de red y
+los envíos manuales a la impresora requieren la clave administrativa creada por
+el instalador. No expongas el puerto 4173 directamente a Internet.
 
-Variables opcionales:
+Variables generales opcionales:
 
 ```sh
 PORT=4173 HOST=0.0.0.0 RNE_DATA_DIR=./data npm start
 RNE_BITMAP_CHUNK_DELAY_MS=250 npm start
+```
+
+Configuración requerida del servidor de impresión OKI —el instalador la agrega
+automáticamente—:
+
+```sh
+OKI_PRINTER_HOST=192.168.100.10 \
+OKI_PRINTER_PORT=5005 \
+OKI_PRINTER_STATUS_URL=http://192.168.100.10:8080/healthz \
+npm start
 ```
 
 `RNE_BITMAP_CHUNK_DELAY_MS` controla la pausa entre fragmentos del mapa y usa
@@ -107,7 +121,8 @@ El instalador:
 - crea un usuario de sistema sin acceso interactivo;
 - guarda la configuración en `/var/lib/rne-dashboard`;
 - activa el inicio automático y muestra la URL final;
-- crea una clave de administración para proteger los cambios de red.
+- crea una clave de administración para proteger los cambios de red y los
+  envíos manuales a la impresora.
 
 Para usar otro puerto para el dashboard:
 
@@ -119,10 +134,10 @@ sudo bash scripts/install-raspbian.sh \
 Puedes volver a ejecutar el instalador para actualizar la aplicación. Las rutas
 de paneles se conservan.
 
-La clave mostrada al terminar la instalación se solicita solamente al cambiar
-la red desde el dashboard. Raspberry Pi OS Bookworm usa NetworkManager por
-defecto; si `nmcli` no está disponible, el dashboard muestra la función como no
-disponible sin modificar la configuración de red existente.
+La clave mostrada al terminar la instalación se solicita al cambiar la red o
+enviar una impresión manual desde el dashboard. Raspberry Pi OS Bookworm usa
+NetworkManager por defecto; si `nmcli` no está disponible, el dashboard muestra
+la función como no disponible sin modificar la configuración de red existente.
 
 El servicio puede elevar privilegios únicamente mediante el helper de red
 instalado como `root`; el archivo de `sudoers` no autoriza otros comandos.
@@ -134,6 +149,75 @@ sudo systemctl status rne-dashboard
 sudo journalctl -u rne-dashboard -f
 sudo systemctl restart rne-dashboard
 ```
+
+## Impresora OKI
+
+La integración usa esta configuración del servidor de impresión:
+
+```text
+Raspberry Pi / host UDP: 192.168.100.10
+Puerto UDP:               5005
+Estado:                   http://192.168.100.10:8080/healthz
+Panel de control:         http://192.168.100.10:8080/
+Codificación:             UTF-8
+Tamaño máximo:            8.192 bytes
+```
+
+El servicio systemd instalado incluye las variables requeridas
+`OKI_PRINTER_HOST`, `OKI_PRINTER_PORT` y `OKI_PRINTER_STATUS_URL`. El navegador
+consulta el estado mediante `/api/printer/status`; nunca hace la consulta de
+salud directamente al servidor OKI.
+
+Cada datagrama UDP es un trabajo completo de texto plano. No se genera HTML,
+PDF ni una imagen. El dashboard rechaza trabajos vacíos o mayores a 8.192 bytes
+UTF-8, conserva saltos de línea y espacios, y cierra el socket después del
+envío. La API manual protegida es:
+
+```text
+POST /api/printer/print
+{ "text": "Texto para imprimir" }
+```
+
+Antes de cada envío, el trabajo se guarda atómicamente en
+`printer-queue.json`. Si la Raspberry Pi de la impresora está apagada, el
+endpoint de salud no responde, el dispositivo está desconectado o no se puede
+escribir, el trabajo permanece en esa cola. El dashboard vuelve a comprobar el
+servidor cada 8 segundos y vacía la cola en orden FIFO cuando está disponible,
+sin superar la capacidad que informa el servidor OKI. La cola sobrevive tanto
+a reinicios como a cortes de energía del dashboard.
+
+La API RNE se revisa cada 30 segundos. En la primera ejecución se guardan los
+IDs que ya existen como línea base y no se imprime el historial. Después, cada
+entrada nueva se formatea en una sola página con todos los campos públicos
+primero (`id`, fecha, área, tiempo, comuna y región) y el testimonio después. Un ID se
+guarda en `printed-submissions.json` solamente después de que el sistema
+operativo acepta el envío UDP. Los IDs que ya están en la cola persistente se
+consideran pendientes y no se vuelven a agregar.
+
+Para revisar el servidor y abrir su control:
+
+```sh
+curl http://192.168.100.10:8080/healthz
+```
+
+Abre `http://192.168.100.10:8080/` en un navegador. Para una prueba UDP manual:
+
+```sh
+printf 'RNE UDP TEST\nPrinter: OKI Microline 320\n' | nc -u -w 1 192.168.100.10 5005
+```
+
+UDP no tiene confirmación de entrega. **Enviado** significa que el datagrama
+completo fue entregado por el dashboard a la pila de red rumbo a la Raspberry
+Pi; no garantiza que el servidor lo haya encolado ni que la impresora haya
+producido físicamente la página.
+
+Si el panel muestra **Servidor offline**, comprueba alimentación, cable de red,
+la IP `192.168.100.10`, el puerto `8080` y el servicio `oki-print-server` en esa
+Raspberry Pi. Si muestra **Impresora desconectada**, revisa el cable USB y que
+exista `/dev/usb/lp0`. Para **Error de permisos**, revisa el propietario y los
+permisos de ese dispositivo y reinicia el servicio de impresión. La profundidad
+de la cola, el trabajo actual, los reintentos y trabajos descartados aparecen
+en el panel OKI del dashboard.
 
 ## Mapas RGB565
 

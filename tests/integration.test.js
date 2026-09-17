@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import dgram from 'node:dgram';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
@@ -69,6 +69,13 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
   const udp = dgram.createSocket('udp4');
   udp.on('message', (message) => udpMessages.push(message.toString('utf8')));
   const udpPort = await new Promise((resolve) => udp.bind(0, '127.0.0.1', () => resolve(udp.address().port)));
+
+  const printerMessages = [];
+  const printerUdp = dgram.createSocket('udp4');
+  printerUdp.on('message', (message) => printerMessages.push(Buffer.from(message)));
+  const printerPort = await new Promise((resolve) => (
+    printerUdp.bind(0, '127.0.0.1', () => resolve(printerUdp.address().port))
+  ));
 
   let bitmapPayload = null;
   let bitmapFrameId = null;
@@ -138,7 +145,27 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
     chileBitmapUdp.bind(0, '127.0.0.1', () => resolve(chileBitmapUdp.address().port))
   ));
 
+  let printerAvailable = true;
   const mockApi = http.createServer((request, reply) => {
+    if (request.url === '/printer-healthz') {
+      if (!printerAvailable) {
+        request.socket.destroy();
+        return;
+      }
+      reply.writeHead(200, { 'content-type': 'application/json' });
+      reply.end(JSON.stringify({
+        healthy: true,
+        uptime_seconds: 3720,
+        current_job: null,
+        last_result: { outcome: 'succeeded', bytes_written: 120 },
+        counts: { enqueued: 8, succeeded: 7, failed_attempts: 2, dropped: 1 },
+        queue: { depth: 0, capacity: 100 },
+        printer: {
+          device: '/dev/usb/lp0', device_exists: true, device_writable: true, encoding: 'utf-8'
+        }
+      }));
+      return;
+    }
     if (request.url === '/api/results/maps/gran-santiago.rgb565') {
       reply.writeHead(200, {
         'content-type': 'application/octet-stream',
@@ -178,6 +205,10 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
   const apiPort = await listen(mockApi);
 
   const dataDir = await mkdtemp(path.join(os.tmpdir(), 'rne-dashboard-test-'));
+  await writeFile(path.join(dataDir, 'admin-token'), 'test-admin-token\n');
+  await writeFile(path.join(dataDir, 'printed-submissions.json'), JSON.stringify({
+    version: 1, initialized: true, printed_ids: []
+  }));
   await writeFile(path.join(dataDir, 'config.json'), JSON.stringify({
     bitmapPanelProvisioned: true,
     chileBitmapPanelProvisioned: true,
@@ -212,13 +243,16 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
     env: {
       ...process.env, NODE_ENV: 'test', RNE_TEST_API_BASE_URL: `http://127.0.0.1:${apiPort}`,
       PORT: '0', HOST: '127.0.0.1', RNE_DATA_DIR: dataDir,
-      RNE_BITMAP_CHUNK_DELAY_MS: '0'
+      RNE_BITMAP_CHUNK_DELAY_MS: '0',
+      OKI_PRINTER_HOST: '127.0.0.1', OKI_PRINTER_PORT: String(printerPort),
+      OKI_PRINTER_STATUS_URL: `http://127.0.0.1:${apiPort}/printer-healthz`
     },
     stdio: ['ignore', 'pipe', 'pipe']
   });
   context.after(async () => {
     child.kill('SIGTERM');
     udp.close();
+    printerUdp.close();
     bitmapUdp.close();
     chileBitmapUdp.close();
     mockApi.close();
@@ -228,7 +262,7 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
   const match = await waitForOutput(child, /127\.0\.0\.1:(\d+)/);
   const dashboardPort = Number(match[1]);
 
-  for (let attempt = 0; attempt < 80 && (udpMessages.length < 5 || !bitmapAcknowledged || !chileBitmapPayload); attempt += 1) {
+  for (let attempt = 0; attempt < 80 && (udpMessages.length < 5 || !bitmapAcknowledged || !chileBitmapPayload || printerMessages.length < 1); attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   assert.deepEqual(udpMessages.sort(), [
@@ -261,12 +295,98 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
   assert.equal(state.health.status, 'ok');
   assert.equal(state.events.filter((event) => event.kind === 'api').length, 6);
   assert.equal(state.events.filter((event) => event.kind === 'udp').length, 7);
+  assert.equal(state.events.filter((event) => event.kind === 'printer').length, 2);
   assert.equal(state.panelRuntime['test-panel-map'].ok, true);
   assert.equal(state.panelRuntime['test-panel-map-chile'].ok, true);
   const coloredPanel = state.config.panels.find((panel) => panel.id === 'test-panel-colors');
   assert.equal(coloredPanel.labelColor, '00FF00');
   assert.equal(coloredPanel.timeColor, 'FF0000');
   assert.equal(coloredPanel.colorsEnabled, true);
+
+  assert.equal(printerMessages.length, 1);
+  const automaticPrint = printerMessages[0].toString('utf8');
+  assert.match(automaticPrint, /TESTIMONIO[\s\S]*Esperé mucho\./);
+  assert.match(automaticPrint, /ID: KHbkj9jtX0/);
+  assert.ok(automaticPrint.indexOf('ID: KHbkj9jtX0') < automaticPrint.indexOf('TESTIMONIO'));
+  const printedState = JSON.parse(await readFile(path.join(dataDir, 'printed-submissions.json'), 'utf8'));
+  assert.deepEqual(printedState.printed_ids, ['KHbkj9jtX0']);
+
+  const printerStatusResponse = await fetch(`http://127.0.0.1:${dashboardPort}/api/printer/status`);
+  assert.equal(printerStatusResponse.status, 200);
+  const printerStatus = await printerStatusResponse.json();
+  assert.equal(printerStatus.state, 'online');
+  assert.equal(printerStatus.devicePath, '/dev/usb/lp0');
+  assert.equal(printerStatus.queueDepth, 0);
+  assert.equal(printerStatus.queueCapacity, 100);
+  assert.equal(printerStatus.successfulJobs, 7);
+  assert.equal(printerStatus.dashboardQueueDepth, 0);
+
+  const unauthenticatedPrint = await fetch(`http://127.0.0.1:${dashboardPort}/api/printer/print`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: 'no autorizado' })
+  });
+  assert.equal(unauthenticatedPrint.status, 401);
+
+  const printerHeaders = { 'content-type': 'application/json', 'x-rne-admin-token': 'test-admin-token' };
+  const emptyPrint = await fetch(`http://127.0.0.1:${dashboardPort}/api/printer/print`, {
+    method: 'POST', headers: printerHeaders, body: JSON.stringify({ text: '  \n ' })
+  });
+  assert.equal(emptyPrint.status, 400);
+  const oversizedPrint = await fetch(`http://127.0.0.1:${dashboardPort}/api/printer/print`, {
+    method: 'POST', headers: printerHeaders, body: JSON.stringify({ text: 'á'.repeat(4097) })
+  });
+  assert.equal(oversizedPrint.status, 413);
+
+  const manualText = 'Español Ñ\n  espacios conservados';
+  const manualPrint = await fetch(`http://127.0.0.1:${dashboardPort}/api/printer/print`, {
+    method: 'POST', headers: printerHeaders, body: JSON.stringify({ text: manualText })
+  });
+  assert.equal(manualPrint.status, 200);
+  const manualResult = await manualPrint.json();
+  assert.equal(manualResult.success, true);
+  assert.equal(manualResult.bytes, Buffer.byteLength(manualText, 'utf8'));
+  assert.match(manualResult.notice, /no garantiza la impresión física/);
+  for (let attempt = 0; attempt < 20 && printerMessages.length < 2; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.equal(printerMessages.length, 2);
+  assert.equal(printerMessages[1].toString('utf8'), manualText);
+
+  printerAvailable = false;
+  const offlineText = 'Trabajo guardado mientras la impresora está apagada';
+  const queuedPrint = await fetch(`http://127.0.0.1:${dashboardPort}/api/printer/print`, {
+    method: 'POST', headers: printerHeaders, body: JSON.stringify({ text: offlineText })
+  });
+  assert.equal(queuedPrint.status, 202);
+  const queuedResult = await queuedPrint.json();
+  assert.equal(queuedResult.success, true);
+  assert.equal(queuedResult.queued, true);
+  assert.match(queuedResult.notice, /quedó guardado/);
+  assert.equal(printerMessages.length, 2);
+  const savedQueue = JSON.parse(await readFile(path.join(dataDir, 'printer-queue.json'), 'utf8'));
+  assert.equal(savedQueue.jobs.length, 1);
+  assert.equal(savedQueue.jobs[0].text, offlineText);
+
+  const offlineStatus = await (await fetch(`http://127.0.0.1:${dashboardPort}/api/printer/status`)).json();
+  assert.equal(offlineStatus.state, 'server_offline');
+  assert.equal(offlineStatus.dashboardQueueDepth, 1);
+
+  printerAvailable = true;
+  await fetch(`http://127.0.0.1:${dashboardPort}/api/printer/status`);
+  for (let attempt = 0; attempt < 40 && printerMessages.length < 3; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.equal(printerMessages.length, 3);
+  assert.equal(printerMessages[2].toString('utf8'), offlineText);
+  const emptiedQueue = JSON.parse(await readFile(path.join(dataDir, 'printer-queue.json'), 'utf8'));
+  assert.deepEqual(emptiedQueue.jobs, []);
+
+  await fetch(`http://127.0.0.1:${dashboardPort}/api/sync`, { method: 'POST' });
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const current = await (await fetch(`http://127.0.0.1:${dashboardPort}/api/state`)).json();
+    if (!current.polling && attempt > 0) break;
+  }
+  assert.equal(printerMessages.length, 3, 'already printed submission IDs must not print twice');
 
   const protectedResponse = await fetch(`http://127.0.0.1:${dashboardPort}/api/network/ipv4`, {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}'
@@ -279,6 +399,9 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
   assert.match(page, /CHASKI · Control RNE/);
   assert.match(page, /Usar colores RGB/);
   assert.match(page, /Mapa de Chile 16×96/);
+  assert.match(page, /OKI Microline 320/);
+  assert.match(page, /id="printerSubmitButton"/);
+  assert.match(page, /id="printerTestButton"/);
 
   const logoResponse = await fetch(`http://127.0.0.1:${dashboardPort}/assets/chaski-mark.svg`);
   assert.equal(logoResponse.status, 200);
