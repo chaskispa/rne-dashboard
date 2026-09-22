@@ -65,10 +65,7 @@ const BITMAP_CHUNK_DELAY_MS = Number.isFinite(requestedBitmapDelay) && requested
   ? requestedBitmapDelay
   : 250;
 const BITMAP_ACK_TIMEOUT_MS = 1_000;
-const requestedTextPanelStagger = Number(process.env.RNE_TEXT_PANEL_STAGGER_MS ?? 1_000);
-const TEXT_PANEL_STAGGER_MS = Number.isFinite(requestedTextPanelStagger) && requestedTextPanelStagger >= 0
-  ? requestedTextPanelStagger
-  : 1_000;
+const DEFAULT_TEXT_PANEL_LEADING_SPACES = 2;
 const SOURCE_TYPES = ['total', ...CATEGORIES, 'latest_wait', 'latest_testimony', ...Object.keys(BITMAP_SOURCES), 'custom'];
 const DISPLAY_UNITS = ['auto', 'minutes', 'hours', 'days', 'months', 'years'];
 const DISPLAY_MODES = ['both', 'time', 'label'];
@@ -158,10 +155,10 @@ function validatePanel(candidate, existing = {}) {
   panel.colorsEnabled = panel.colorsEnabled === true;
   panel.labelColor = normalizeRgbColor(panel.labelColor, '00FF00');
   panel.timeColor = normalizeRgbColor(panel.timeColor, 'FF0000');
-  if (panel.messageDelayMs !== undefined) {
-    panel.messageDelayMs = Number(panel.messageDelayMs);
-    if (!Number.isInteger(panel.messageDelayMs) || panel.messageDelayMs < 0 || panel.messageDelayMs > 30_000) {
-      throw new Error('El retraso del mensaje debe estar entre 0 y 30 segundos.');
+  if (panel.messageLeadingSpaces !== undefined) {
+    panel.messageLeadingSpaces = Number(panel.messageLeadingSpaces);
+    if (!Number.isInteger(panel.messageLeadingSpaces) || panel.messageLeadingSpaces < 0 || panel.messageLeadingSpaces > 40) {
+      throw new Error('El desfase del scroll debe estar entre 0 y 40 espacios.');
     }
   }
   panel.enabled = panel.enabled !== false;
@@ -438,7 +435,7 @@ function publicState() {
     config,
     apiBaseUrl: API_BASE_URL,
     pollIntervalSeconds: POLL_INTERVAL_MS / 1000,
-    defaultTextPanelStaggerMs: TEXT_PANEL_STAGGER_MS,
+    defaultTextPanelLeadingSpaces: DEFAULT_TEXT_PANEL_LEADING_SPACES,
     lastPollAt,
     nextPollAt,
     polling,
@@ -624,7 +621,7 @@ function clipUdpText(value, maxVisibleCharacters = 80) {
   return clipped || 'SIN DATOS';
 }
 
-function renderPanelMessage(panel, data) {
+function renderPanelMessage(panel, data, leadingSpaces = panel.messageLeadingSpaces ?? 0) {
   const context = contextFromResults(data);
   const minutes = timedPanelValue(panel, context);
   let rendered;
@@ -647,7 +644,14 @@ function renderPanelMessage(panel, data) {
       Object.hasOwn(context, key) ? String(context[key]) : match
     ));
   }
-  return clipUdpText(rendered);
+  const safeLeadingSpaces = Math.max(0, Math.min(40, leadingSpaces));
+  const clipped = clipUdpText(rendered, 80 - safeLeadingSpaces);
+  if (safeLeadingSpaces === 0) return clipped;
+  const initialColorTag = clipped.match(/^\[[0-9a-f]{6}\]/iu)?.[0];
+  if (initialColorTag) {
+    return `${initialColorTag}${' '.repeat(safeLeadingSpaces)}${clipped.slice(initialColorTag.length)}`;
+  }
+  return `[${panel.labelColor}]${' '.repeat(safeLeadingSpaces)}${clipped}`;
 }
 
 function sendUdp(panel, message, reason = 'sync') {
@@ -784,11 +788,11 @@ async function sendBitmapUdp(panel, payload, reason = 'sync') {
 async function sendTextPanels(data) {
   const textPanels = config.panels.filter((panel) => !isBitmapSource(panel.source));
   const enabled = textPanels.filter((panel) => panel.enabled);
-  await Promise.all(enabled.map(async (panel) => {
+  await Promise.all(enabled.map((panel) => {
     const routeIndex = textPanels.indexOf(panel);
-    const delayMs = panel.messageDelayMs ?? routeIndex * TEXT_PANEL_STAGGER_MS;
-    if (delayMs > 0) await wait(delayMs);
-    return sendUdp(panel, renderPanelMessage(panel, data));
+    const leadingSpaces = panel.messageLeadingSpaces
+      ?? Math.min(40, routeIndex * DEFAULT_TEXT_PANEL_LEADING_SPACES);
+    return sendUdp(panel, renderPanelMessage(panel, data, leadingSpaces));
   }));
 }
 

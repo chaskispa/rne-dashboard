@@ -49,7 +49,6 @@ Variables generales opcionales:
 ```sh
 PORT=4173 HOST=0.0.0.0 RNE_DATA_DIR=./data npm start
 RNE_BITMAP_CHUNK_DELAY_MS=250 npm start
-RNE_TEXT_PANEL_STAGGER_MS=1000 npm start
 ```
 
 Configuración requerida del servidor de impresión OKI —el instalador la agrega
@@ -65,12 +64,15 @@ npm start
 `RNE_BITMAP_CHUNK_DELAY_MS` controla la pausa entre fragmentos del mapa y usa
 `250` ms por defecto para no saturar el receptor W5100S.
 
-Cada ruta de texto permite configurar en el dashboard el **Retraso antes de
-mostrar el mensaje**, entre 0 y 30 segundos. Usa valores distintos para que los
-letreros no comiencen a desplazarse sincronizados. Las rutas existentes que
-todavía no tengan un retraso guardado usan su posición en la lista multiplicada
-por `RNE_TEXT_PANEL_STAGGER_MS` (`1000` ms por defecto). Al editar y guardar una
-ruta, su retraso queda almacenado en `data/config.json`.
+Cada ruta de texto permite configurar en el dashboard el **Desfase del scroll**,
+entre 0 y 40 espacios iniciales. Los espacios aumentan el recorrido invisible
+antes de que aparezca el texto y cambian la duración de su ciclo, evitando que
+los letreros permanezcan sincronizados. Las rutas antiguas reciben por defecto
+0, 2, 4, 6… espacios según su posición; al editar y guardar una ruta, el valor
+queda almacenado en `data/config.json`. Para funcionar con el firmware actual,
+que recorta espacios al comienzo del datagrama, el dashboard coloca primero una
+etiqueta de color invisible y luego los espacios. Si el mensaje no tenía una
+etiqueta RGB, se usa el **Color de etiqueta** configurado para la ruta.
 
 ## Formato de tiempo
 

@@ -194,11 +194,11 @@
         </label>
         <label>Puerto UDP<input id="panelPort" type="number" min="1" max="65535" value="5000" required></label>
       </div>
-      <div id="messageDelayField">
-        <label>Retraso antes de mostrar el mensaje (segundos)
-          <input id="panelMessageDelaySeconds" type="number" min="0" max="30" step="0.1" value="0" required>
+      <div id="messageLeadingSpacesField">
+        <label>Desfase del scroll (espacios iniciales)
+          <input id="panelMessageLeadingSpaces" type="number" min="0" max="40" step="1" value="0" required>
         </label>
-        <p class="token-help">Usa un valor distinto en cada letrero para evitar que comiencen a desplazarse sincronizados.</p>
+        <p class="token-help">Usa valores como 0, 2, 4 y 6. El dashboard envía una etiqueta RGB invisible antes de los espacios para que el firmware actual no los elimine.</p>
       </div>
       <div id="timeFormatFields" class="form-grid two">
         <label id="unitField">Unidad

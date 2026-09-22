@@ -46,15 +46,16 @@ function panelFormatSummary(panel) {
   return `${displayModeLabels[mode]}${unit}${color}`;
 }
 
-function panelMessageDelayMs(panel) {
-  if (Number.isInteger(panel?.messageDelayMs)) return panel.messageDelayMs;
+function panelMessageLeadingSpaces(panel) {
+  if (Number.isInteger(panel?.messageLeadingSpaces)) return panel.messageLeadingSpaces;
   const textPanels = state.data?.config.panels.filter((item) => !bitmapSources.includes(item.source)) || [];
   const index = Math.max(0, textPanels.findIndex((item) => item.id === panel?.id));
-  return index * (state.data?.defaultTextPanelStaggerMs ?? 1_000);
+  return Math.min(40, index * (state.data?.defaultTextPanelLeadingSpaces ?? 2));
 }
 
-function formatMessageDelay(panel) {
-  return `${(panelMessageDelayMs(panel) / 1_000).toLocaleString('es-CL', { maximumFractionDigits: 1 })} s de retraso`;
+function formatMessageLeadingSpaces(panel) {
+  const spaces = panelMessageLeadingSpaces(panel);
+  return `${spaces} espacio${spaces === 1 ? '' : 's'} de desfase`;
 }
 
 function escapeHtml(value) {
@@ -153,7 +154,7 @@ function renderPanels() {
       : panel.source === 'custom' ? (panel.template || 'Plantilla personalizada') : 'Texto público';
     const routeSummary = bitmapSources.includes(panel.source)
       ? formatSummary
-      : `${formatSummary} · ${formatMessageDelay(panel)}`;
+      : `${formatSummary} · ${formatMessageLeadingSpaces(panel)}`;
     return `<article class="panel-row ${panel.enabled ? '' : 'disabled'}" data-panel-id="${escapeHtml(panel.id)}">
       ${ledIcon()}
       <div><p class="panel-name">${escapeHtml(panel.name)}</p><div class="panel-meta">${escapeHtml(panel.host)}:${panel.port}</div><div class="send-status"><i class="status-dot ${statusClass}"></i>${escapeHtml(statusText)}</div></div>
@@ -409,9 +410,14 @@ function openPanelDialog(panel = null) {
   $('#panelSource').value = source;
   $('#panelSource').dataset.previous = source;
   $('#panelPort').value = panel?.port || (bitmapSources.includes(source) ? 5001 : 5000);
-  const defaultDelayMs = (state.data?.config.panels.filter((item) => !bitmapSources.includes(item.source)).length || 0)
-    * (state.data?.defaultTextPanelStaggerMs ?? 1_000);
-  $('#panelMessageDelaySeconds').value = (panel ? panelMessageDelayMs(panel) : defaultDelayMs) / 1_000;
+  const defaultLeadingSpaces = Math.min(
+    40,
+    (state.data?.config.panels.filter((item) => !bitmapSources.includes(item.source)).length || 0)
+      * (state.data?.defaultTextPanelLeadingSpaces ?? 2)
+  );
+  $('#panelMessageLeadingSpaces').value = panel
+    ? panelMessageLeadingSpaces(panel)
+    : defaultLeadingSpaces;
   $('#panelTemplate').value = panel?.template || '';
   $('#panelUnit').value = panel?.unit || 'auto';
   $('#panelDisplayMode').value = panel ? panelDisplayMode(panel) : 'both';
@@ -438,7 +444,7 @@ function updatePanelFormatFields() {
   $('#timeColorField').hidden = mode === 'label';
   $('#templateField').hidden = source !== 'custom';
   $('#bitmapField').hidden = !bitmapSources.includes(source);
-  $('#messageDelayField').hidden = bitmapSources.includes(source);
+  $('#messageLeadingSpacesField').hidden = bitmapSources.includes(source);
   if (bitmapSources.includes(source)) {
     $('#bitmapField').textContent = source === 'map_chile'
       ? 'Envía el mapa RGB565 de Chile 16×96 sin modificaciones al puerto UDP 5001 y espera la confirmación del panel.'
@@ -493,7 +499,7 @@ $('#panelForm').addEventListener('submit', async (event) => {
     colorsEnabled: $('#panelColorsEnabled').checked,
     labelColor: $('#panelLabelColor').value.slice(1),
     timeColor: $('#panelTimeColor').value.slice(1),
-    messageDelayMs: Math.round(Number($('#panelMessageDelaySeconds').value) * 1_000),
+    messageLeadingSpaces: Number($('#panelMessageLeadingSpaces').value),
     enabled: $('#panelEnabled').checked
   };
   try {
@@ -653,8 +659,8 @@ function registerWebMcpTools() {
         totalMinutes: state.data.results?.tiempo_total ?? null,
         lastPollAt: state.data.lastPollAt,
         detectedLanDevices: state.data.lan?.devices?.length || 0,
-        panels: state.data.config.panels.map(({ id, name, host, port, source, unit, displayMode, colorsEnabled, labelColor, timeColor, messageDelayMs, enabled }) => ({
-          id, name, host, port, source, unit, displayMode, colorsEnabled, labelColor, timeColor, messageDelayMs, enabled
+        panels: state.data.config.panels.map(({ id, name, host, port, source, unit, displayMode, colorsEnabled, labelColor, timeColor, messageLeadingSpaces, enabled }) => ({
+          id, name, host, port, source, unit, displayMode, colorsEnabled, labelColor, timeColor, messageLeadingSpaces, enabled
         }))
       };
     }
