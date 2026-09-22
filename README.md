@@ -49,6 +49,7 @@ Variables generales opcionales:
 ```sh
 PORT=4173 HOST=0.0.0.0 RNE_DATA_DIR=./data npm start
 RNE_BITMAP_CHUNK_DELAY_MS=250 npm start
+RNE_TEXT_PANEL_STAGGER_MS=1000 npm start
 ```
 
 Configuración requerida del servidor de impresión OKI —el instalador la agrega
@@ -63,6 +64,11 @@ npm start
 
 `RNE_BITMAP_CHUNK_DELAY_MS` controla la pausa entre fragmentos del mapa y usa
 `250` ms por defecto para no saturar el receptor W5100S.
+
+`RNE_TEXT_PANEL_STAGGER_MS` controla la separación entre el inicio de cada
+letrero de texto. Usa `1000` ms por defecto para que los mensajes no comiencen
+a desplazarse sincronizados. El orden de inicio es el mismo orden de las rutas
+en el dashboard; se puede usar `0` para desactivar la separación.
 
 ## Formato de tiempo
 

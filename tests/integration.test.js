@@ -66,8 +66,12 @@ function waitForOutput(child, pattern) {
 
 test('polls RNE and routes the formatted result over UDP', async (context) => {
   const udpMessages = [];
+  const udpMessageTimes = [];
   const udp = dgram.createSocket('udp4');
-  udp.on('message', (message) => udpMessages.push(message.toString('utf8')));
+  udp.on('message', (message) => {
+    udpMessages.push(message.toString('utf8'));
+    udpMessageTimes.push(performance.now());
+  });
   const udpPort = await new Promise((resolve) => udp.bind(0, '127.0.0.1', () => resolve(udp.address().port)));
 
   const printerMessages = [];
@@ -244,6 +248,7 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
       ...process.env, NODE_ENV: 'test', RNE_TEST_API_BASE_URL: `http://127.0.0.1:${apiPort}`,
       PORT: '0', HOST: '127.0.0.1', RNE_DATA_DIR: dataDir,
       RNE_BITMAP_CHUNK_DELAY_MS: '0',
+      RNE_TEXT_PANEL_STAGGER_MS: '25',
       OKI_PRINTER_HOST: '127.0.0.1', OKI_PRINTER_PORT: String(printerPort),
       OKI_PRINTER_STATUS_URL: `http://127.0.0.1:${apiPort}/printer-healthz`
     },
@@ -269,6 +274,13 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
     '2 DÍAS', '2.835 MIN', '47,3 H',
     '[00FF00]TRÁMITES', '[00FF00]TRÁMITES [FF0000]2 DÍAS'
   ].sort());
+  assert.equal(udpMessageTimes.length, 5);
+  for (let index = 1; index < udpMessageTimes.length; index += 1) {
+    assert.ok(
+      udpMessageTimes[index] - udpMessageTimes[index - 1] >= 15,
+      'text panel messages should be staggered instead of sent simultaneously'
+    );
+  }
   assert.ok(bitmapPayload);
   assert.equal(bitmapPayload.length, 96 * 96 * 2);
   assert.equal(Buffer.compare(bitmapPayload, bitmapFixture), 0);

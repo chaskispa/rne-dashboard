@@ -65,6 +65,10 @@ const BITMAP_CHUNK_DELAY_MS = Number.isFinite(requestedBitmapDelay) && requested
   ? requestedBitmapDelay
   : 250;
 const BITMAP_ACK_TIMEOUT_MS = 1_000;
+const requestedTextPanelStagger = Number(process.env.RNE_TEXT_PANEL_STAGGER_MS ?? 1_000);
+const TEXT_PANEL_STAGGER_MS = Number.isFinite(requestedTextPanelStagger) && requestedTextPanelStagger >= 0
+  ? requestedTextPanelStagger
+  : 1_000;
 const SOURCE_TYPES = ['total', ...CATEGORIES, 'latest_wait', 'latest_testimony', ...Object.keys(BITMAP_SOURCES), 'custom'];
 const DISPLAY_UNITS = ['auto', 'minutes', 'hours', 'days', 'months', 'years'];
 const DISPLAY_MODES = ['both', 'time', 'label'];
@@ -772,7 +776,10 @@ async function sendBitmapUdp(panel, payload, reason = 'sync') {
 
 async function sendTextPanels(data) {
   const enabled = config.panels.filter((panel) => panel.enabled && !isBitmapSource(panel.source));
-  await Promise.all(enabled.map((panel) => sendUdp(panel, renderPanelMessage(panel, data))));
+  await Promise.all(enabled.map(async (panel, index) => {
+    if (index > 0) await wait(index * TEXT_PANEL_STAGGER_MS);
+    return sendUdp(panel, renderPanelMessage(panel, data));
+  }));
 }
 
 async function sendBitmapPanels(source, payload, reason = 'sync') {
