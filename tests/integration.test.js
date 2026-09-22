@@ -37,6 +37,8 @@ const categoriesFixture = {
 
 const bitmapFixture = Buffer.alloc(96 * 96 * 2, 0x5A);
 const qrBitmapFixture = await readFile(new URL('../public/assets/rne-qr-96x96.rgb565', import.meta.url));
+assert.equal(qrBitmapFixture.readUInt16BE(0), 0x0000, 'QR frame background should be black');
+assert.ok(qrBitmapFixture.includes(Buffer.from([0xFF, 0xFF])), 'QR frame should contain white modules');
 const chileBitmapFixture = Buffer.alloc(16 * 96 * 2);
 for (let index = 0; index < chileBitmapFixture.length; index += 1) {
   chileBitmapFixture[index] = (index * 37) & 0xFF;

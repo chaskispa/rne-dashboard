@@ -72,11 +72,12 @@ El panel **Mapa Gran Santiago 96×96** muestra cada 120 segundos un QR de
 mapa más reciente. Mientras el QR está activo, las consultas normales siguen
 actualizando la copia del mapa sin sobrescribir la pantalla.
 
-El QR usa una cuadrícula válida de 29×29 módulos, escalada a dos píxeles por
-módulo, con una zona silenciosa blanca de cuatro módulos. El resultado ocupa
-74×74 píxeles y está centrado con 11 píxeles blancos por lado dentro del cuadro
-RGB565 de 96×96. Esta geometría conserva todos los módulos; reducir el QR a
-24×24 píxeles eliminaría información y perjudicaría su lectura.
+El QR invertido usa módulos blancos sobre fondo negro. Su cuadrícula válida de
+29×29 módulos se escala a dos píxeles por módulo, con una zona de aislamiento
+negra de cuatro módulos. El resultado ocupa 74×74 píxeles y está centrado con
+11 píxeles negros por lado dentro del cuadro RGB565 de 96×96. Esta geometría
+conserva todos los módulos; reducir el QR a 24×24 píxeles eliminaría información
+y perjudicaría su lectura.
 
 El cuadro está guardado localmente en
 `public/assets/rne-qr-96x96.rgb565`; no se genera ni descarga en la Raspberry
