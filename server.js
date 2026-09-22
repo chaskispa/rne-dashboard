@@ -66,6 +66,19 @@ const BITMAP_CHUNK_DELAY_MS = Number.isFinite(requestedBitmapDelay) && requested
   : 250;
 const BITMAP_ACK_TIMEOUT_MS = 1_000;
 const DEFAULT_TEXT_PANEL_LEADING_SPACES = 2;
+
+function environmentMilliseconds(name, fallback, allowZero = false) {
+  const value = Number(process.env[name] ?? fallback);
+  return Number.isFinite(value) && (allowZero ? value >= 0 : value > 0) ? value : fallback;
+}
+
+const QR_OVERLAY_INTERVAL_MS = environmentMilliseconds('RNE_QR_OVERLAY_INTERVAL_MS', 120_000);
+const QR_OVERLAY_DURATION_MS = environmentMilliseconds('RNE_QR_OVERLAY_DURATION_MS', 30_000);
+const QR_OVERLAY_INITIAL_DELAY_MS = environmentMilliseconds(
+  'RNE_QR_OVERLAY_INITIAL_DELAY_MS', QR_OVERLAY_INTERVAL_MS, true
+);
+const QR_OVERLAY_ENABLED = process.env.RNE_QR_OVERLAY_ENABLED !== '0';
+const QR_OVERLAY_PATH = path.join(publicDir, 'assets', 'rne-qr-96x96.rgb565');
 const SOURCE_TYPES = ['total', ...CATEGORIES, 'latest_wait', 'latest_testimony', ...Object.keys(BITMAP_SOURCES), 'custom'];
 const DISPLAY_UNITS = ['auto', 'minutes', 'hours', 'days', 'months', 'years'];
 const DISPLAY_MODES = ['both', 'time', 'label'];
@@ -102,6 +115,12 @@ let polling = false;
 let timer = null;
 let lanTimer = null;
 let printerRetryTimer = null;
+let qrOverlayTimer = null;
+let qrOverlayRestoreTimer = null;
+let qrOverlayFrame = null;
+let qrOverlayActive = false;
+let qrOverlayStartedAt = null;
+let qrOverlayEndsAt = null;
 let events = [];
 let adminToken = '';
 let printedSubmissionState = { initialized: false, ids: new Set() };
@@ -110,6 +129,8 @@ let printerQueueProcessing = false;
 let automaticPrinterQueue = Promise.resolve();
 let lanScan = { available: null, scanning: false, lastScanAt: null, devices: [], error: null };
 const panelRuntime = new Map();
+const latestBitmapFrames = new Map();
+const bitmapSendQueues = new Map();
 const sseClients = new Set();
 
 function json(reply, status, payload) {
@@ -207,6 +228,15 @@ async function loadConfig() {
     if (configChanged) await saveConfig();
   } catch (error) {
     if (error.code !== 'ENOENT') console.error('Could not load config:', error.message);
+  }
+}
+
+async function loadQrOverlayFrame() {
+  if (!QR_OVERLAY_ENABLED) return;
+  try {
+    qrOverlayFrame = prepareBitmapFrame(GRAN_SANTIAGO_BITMAP_SOURCE, await readFile(QR_OVERLAY_PATH));
+  } catch (error) {
+    console.error('Could not load QR overlay:', error.message);
   }
 }
 
@@ -436,6 +466,14 @@ function publicState() {
     apiBaseUrl: API_BASE_URL,
     pollIntervalSeconds: POLL_INTERVAL_MS / 1000,
     defaultTextPanelLeadingSpaces: DEFAULT_TEXT_PANEL_LEADING_SPACES,
+    qrOverlay: {
+      enabled: Boolean(QR_OVERLAY_ENABLED && qrOverlayFrame),
+      active: qrOverlayActive,
+      intervalSeconds: QR_OVERLAY_INTERVAL_MS / 1_000,
+      durationSeconds: QR_OVERLAY_DURATION_MS / 1_000,
+      startedAt: qrOverlayStartedAt,
+      endsAt: qrOverlayEndsAt
+    },
     lastPollAt,
     nextPollAt,
     polling,
@@ -801,6 +839,52 @@ async function sendBitmapPanels(source, payload, reason = 'sync') {
   await Promise.all(enabled.map((panel) => sendBitmapUdp(panel, payload, reason)));
 }
 
+function queueBitmapPanels(source, payload, reason = 'sync') {
+  const previous = bitmapSendQueues.get(source) || Promise.resolve();
+  const queued = previous.then(() => sendBitmapPanels(source, payload, reason));
+  bitmapSendQueues.set(source, queued);
+  const cleanup = () => {
+    if (bitmapSendQueues.get(source) === queued) bitmapSendQueues.delete(source);
+  };
+  void queued.then(cleanup, cleanup);
+  return queued;
+}
+
+function scheduleQrOverlay(delayMs = QR_OVERLAY_INTERVAL_MS) {
+  clearTimeout(qrOverlayTimer);
+  if (!QR_OVERLAY_ENABLED || !qrOverlayFrame) return;
+  qrOverlayTimer = setTimeout(() => void showQrOverlay(), Math.max(0, delayMs));
+}
+
+async function restoreQrOverlay(cycleStartedAt) {
+  qrOverlayEndsAt = null;
+  const latestFrame = latestBitmapFrames.get(GRAN_SANTIAGO_BITMAP_SOURCE);
+  if (latestFrame) {
+    await queueBitmapPanels(GRAN_SANTIAGO_BITMAP_SOURCE, latestFrame, 'qr-restore');
+  }
+  qrOverlayActive = false;
+  qrOverlayStartedAt = null;
+  broadcast();
+  scheduleQrOverlay(Math.max(0, QR_OVERLAY_INTERVAL_MS - (Date.now() - cycleStartedAt)));
+}
+
+async function showQrOverlay() {
+  if (qrOverlayActive || !QR_OVERLAY_ENABLED || !qrOverlayFrame) return;
+  const cycleStartedAt = Date.now();
+  qrOverlayActive = true;
+  qrOverlayStartedAt = new Date(cycleStartedAt).toISOString();
+  qrOverlayEndsAt = null;
+  broadcast();
+  await queueBitmapPanels(GRAN_SANTIAGO_BITMAP_SOURCE, qrOverlayFrame, 'qr-overlay');
+  qrOverlayEndsAt = new Date(Date.now() + QR_OVERLAY_DURATION_MS).toISOString();
+  broadcast();
+  clearTimeout(qrOverlayRestoreTimer);
+  qrOverlayRestoreTimer = setTimeout(
+    () => void restoreQrOverlay(cycleStartedAt),
+    Math.max(0, QR_OVERLAY_DURATION_MS)
+  );
+}
+
 function markBitmapPanelsFailed(source, error) {
   const message = error?.message || 'No fue posible descargar el mapa desde la API.';
   for (const panel of config.panels.filter((item) => item.enabled && item.source === source)) {
@@ -864,7 +948,10 @@ async function poll() {
     const source = activeBitmapSources[index];
     const response = bitmapResponses[index];
     if (response.status === 'fulfilled') {
-      sends.push(sendBitmapPanels(source, response.value.frame));
+      latestBitmapFrames.set(source, response.value.frame);
+      if (source !== GRAN_SANTIAGO_BITMAP_SOURCE || !qrOverlayActive) {
+        sends.push(queueBitmapPanels(source, response.value.frame));
+      }
     } else {
       markBitmapPanelsFailed(source, response.reason);
     }
@@ -1280,7 +1367,7 @@ function serveStatic(request, reply, url) {
   stream.on('error', () => json(reply, 404, { error: 'No encontrado.' }));
 }
 
-await Promise.all([loadConfig(), loadAdminToken(), loadPrintedSubmissionState(), loadPrinterQueue()]);
+await Promise.all([loadConfig(), loadQrOverlayFrame(), loadAdminToken(), loadPrintedSubmissionState(), loadPrinterQueue()]);
 
 const server = http.createServer(async (request, reply) => {
   try {
@@ -1299,6 +1386,7 @@ server.listen(port, host, () => {
   console.log(`RNE dashboard listening on http://${host}:${address.port}`);
   void poll();
   void retryPrinterQueue();
+  scheduleQrOverlay(QR_OVERLAY_INITIAL_DELAY_MS);
   if (process.env.NODE_ENV !== 'test') void scanLan();
 });
 
@@ -1306,6 +1394,8 @@ function shutdown() {
   clearTimeout(timer);
   clearTimeout(lanTimer);
   clearTimeout(printerRetryTimer);
+  clearTimeout(qrOverlayTimer);
+  clearTimeout(qrOverlayRestoreTimer);
   for (const client of sseClients) client.end();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(1), 5_000).unref();

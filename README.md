@@ -49,6 +49,7 @@ Variables generales opcionales:
 ```sh
 PORT=4173 HOST=0.0.0.0 RNE_DATA_DIR=./data npm start
 RNE_BITMAP_CHUNK_DELAY_MS=250 npm start
+RNE_QR_OVERLAY_ENABLED=0 npm start
 ```
 
 Configuración requerida del servidor de impresión OKI —el instalador la agrega
@@ -63,6 +64,23 @@ npm start
 
 `RNE_BITMAP_CHUNK_DELAY_MS` controla la pausa entre fragmentos del mapa y usa
 `250` ms por defecto para no saturar el receptor W5100S.
+
+## QR periódico en el panel 96×96
+
+El panel **Mapa Gran Santiago 96×96** muestra cada 120 segundos un QR de
+`https://registronacionaldeespera.cl` durante 30 segundos y luego recupera el
+mapa más reciente. Mientras el QR está activo, las consultas normales siguen
+actualizando la copia del mapa sin sobrescribir la pantalla.
+
+El QR usa una cuadrícula válida de 29×29 módulos, escalada a dos píxeles por
+módulo, con una zona silenciosa blanca de cuatro módulos. El resultado ocupa
+74×74 píxeles y está centrado con 11 píxeles blancos por lado dentro del cuadro
+RGB565 de 96×96. Esta geometría conserva todos los módulos; reducir el QR a
+24×24 píxeles eliminaría información y perjudicaría su lectura.
+
+El cuadro está guardado localmente en
+`public/assets/rne-qr-96x96.rgb565`; no se genera ni descarga en la Raspberry
+Pi. `RNE_QR_OVERLAY_ENABLED=0` desactiva la rotación si fuera necesario.
 
 Cada ruta de texto permite configurar en el dashboard el **Desfase del scroll**,
 entre 0 y 40 espacios iniciales. Los espacios aumentan el recorrido invisible

@@ -36,6 +36,7 @@ const categoriesFixture = {
 };
 
 const bitmapFixture = Buffer.alloc(96 * 96 * 2, 0x5A);
+const qrBitmapFixture = await readFile(new URL('../public/assets/rne-qr-96x96.rgb565', import.meta.url));
 const chileBitmapFixture = Buffer.alloc(16 * 96 * 2);
 for (let index = 0; index < chileBitmapFixture.length; index += 1) {
   chileBitmapFixture[index] = (index * 37) & 0xFF;
@@ -81,7 +82,9 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
   let bitmapFrameId = null;
   const bitmapChunks = new Map();
   const bitmapAttempts = [];
-  let bitmapAcknowledged = false;
+  const acknowledgedBitmapFrames = [];
+  let firstBitmapAttempts = null;
+  let firstBitmapFrameId = null;
   const bitmapUdp = dgram.createSocket('udp4');
   bitmapUdp.on('message', (message, remote) => {
     if (message.length < 8 || message.subarray(0, 4).toString() !== 'RGBU') return;
@@ -105,11 +108,16 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
     bitmapChunks.set(chunkIndex, message.subarray(8));
     if (bitmapChunks.size === chunkCount) {
       bitmapPayload = Buffer.concat(Array.from({ length: chunkCount }, (_, index) => bitmapChunks.get(index)));
-      if (bitmapAttempts.length >= 2 && bitmapAttempts.at(-1).length === chunkCount) {
+      const canAcknowledge = acknowledgedBitmapFrames.length > 0 || bitmapAttempts.length >= 2;
+      if (canAcknowledge && bitmapAttempts.at(-1).length === chunkCount) {
         const acknowledgement = Buffer.concat([
           Buffer.from('RGBU'), Buffer.from([frameId >> 8, frameId & 0xFF]), Buffer.from('OK')
         ]);
-        bitmapAcknowledged = true;
+        if (!firstBitmapAttempts) {
+          firstBitmapAttempts = bitmapAttempts.map((attempt) => attempt.map((chunk) => ({ ...chunk })));
+          firstBitmapFrameId = frameId;
+        }
+        acknowledgedBitmapFrames.push(Buffer.from(bitmapPayload));
         bitmapUdp.send(acknowledgement, remote.port, remote.address);
       }
     }
@@ -244,6 +252,9 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
       ...process.env, NODE_ENV: 'test', RNE_TEST_API_BASE_URL: `http://127.0.0.1:${apiPort}`,
       PORT: '0', HOST: '127.0.0.1', RNE_DATA_DIR: dataDir,
       RNE_BITMAP_CHUNK_DELAY_MS: '0',
+      RNE_QR_OVERLAY_INITIAL_DELAY_MS: '100',
+      RNE_QR_OVERLAY_INTERVAL_MS: '120000',
+      RNE_QR_OVERLAY_DURATION_MS: '50',
       OKI_PRINTER_HOST: '127.0.0.1', OKI_PRINTER_PORT: String(printerPort),
       OKI_PRINTER_STATUS_URL: `http://127.0.0.1:${apiPort}/printer-healthz`
     },
@@ -262,7 +273,7 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
   const match = await waitForOutput(child, /127\.0\.0\.1:(\d+)/);
   const dashboardPort = Number(match[1]);
 
-  for (let attempt = 0; attempt < 80 && (udpMessages.length < 5 || !bitmapAcknowledged || !chileBitmapPayload || printerMessages.length < 1); attempt += 1) {
+  for (let attempt = 0; attempt < 80 && (udpMessages.length < 5 || acknowledgedBitmapFrames.length < 3 || !chileBitmapPayload || printerMessages.length < 1); attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   assert.deepEqual(udpMessages.sort(), [
@@ -272,13 +283,17 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
   assert.ok(bitmapPayload);
   assert.equal(bitmapPayload.length, 96 * 96 * 2);
   assert.equal(Buffer.compare(bitmapPayload, bitmapFixture), 0);
+  assert.equal(acknowledgedBitmapFrames.length, 3);
+  assert.equal(Buffer.compare(acknowledgedBitmapFrames[0], bitmapFixture), 0);
+  assert.equal(Buffer.compare(acknowledgedBitmapFrames[1], qrBitmapFixture), 0);
+  assert.equal(Buffer.compare(acknowledgedBitmapFrames[2], bitmapFixture), 0);
   assert.ok(chileBitmapPayload);
   assert.equal(chileBitmapPayload.length, 16 * 96 * 2);
   assert.equal(Buffer.compare(chileBitmapPayload, chileBitmapFixture), 0);
-  assert.equal(bitmapAttempts.length, 2);
-  for (const attempt of bitmapAttempts) {
+  assert.equal(firstBitmapAttempts.length, 2);
+  for (const attempt of firstBitmapAttempts) {
     assert.deepEqual(attempt.map((chunk) => chunk.chunkIndex), Array.from({ length: 18 }, (_, index) => index));
-    assert.ok(attempt.every((chunk) => chunk.frameId === bitmapFrameId));
+    assert.ok(attempt.every((chunk) => chunk.frameId === firstBitmapFrameId));
     assert.ok(attempt.every((chunk) => chunk.chunkCount === 18));
     assert.ok(attempt.every((chunk) => chunk.payloadLength > 0 && chunk.payloadLength <= 1024));
   }
@@ -293,9 +308,17 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
   assert.equal(state.results.unidad_tiempo, 'minutos');
   assert.equal(state.results.version, 3);
   assert.equal(state.defaultTextPanelLeadingSpaces, 2);
+  assert.deepEqual(state.qrOverlay, {
+    enabled: true,
+    active: false,
+    intervalSeconds: 120,
+    durationSeconds: 0.05,
+    startedAt: null,
+    endsAt: null
+  });
   assert.equal(state.health.status, 'ok');
   assert.equal(state.events.filter((event) => event.kind === 'api').length, 6);
-  assert.equal(state.events.filter((event) => event.kind === 'udp').length, 7);
+  assert.equal(state.events.filter((event) => event.kind === 'udp').length, 9);
   assert.equal(state.events.filter((event) => event.kind === 'printer').length, 2);
   assert.equal(state.panelRuntime['test-panel-map'].ok, true);
   assert.equal(state.panelRuntime['test-panel-map-chile'].ok, true);
