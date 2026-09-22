@@ -65,10 +65,12 @@ npm start
 `RNE_BITMAP_CHUNK_DELAY_MS` controla la pausa entre fragmentos del mapa y usa
 `250` ms por defecto para no saturar el receptor W5100S.
 
-`RNE_TEXT_PANEL_STAGGER_MS` controla la separación entre el inicio de cada
-letrero de texto. Usa `1000` ms por defecto para que los mensajes no comiencen
-a desplazarse sincronizados. El orden de inicio es el mismo orden de las rutas
-en el dashboard; se puede usar `0` para desactivar la separación.
+Cada ruta de texto permite configurar en el dashboard el **Retraso antes de
+mostrar el mensaje**, entre 0 y 30 segundos. Usa valores distintos para que los
+letreros no comiencen a desplazarse sincronizados. Las rutas existentes que
+todavía no tengan un retraso guardado usan su posición en la lista multiplicada
+por `RNE_TEXT_PANEL_STAGGER_MS` (`1000` ms por defecto). Al editar y guardar una
+ruta, su retraso queda almacenado en `data/config.json`.
 
 ## Formato de tiempo
 

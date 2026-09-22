@@ -218,21 +218,21 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
     chileBitmapPanelProvisioned: true,
     panels: [{
       id: 'test-panel', name: 'Panel test', host: '127.0.0.1', port: udpPort,
-      source: 'total', template: '', unit: 'auto', displayMode: 'time', enabled: true
+      source: 'total', template: '', unit: 'auto', displayMode: 'time', messageDelayMs: 0, enabled: true
     }, {
       id: 'test-panel-minutes', name: 'Panel minutes', host: '127.0.0.1', port: udpPort,
-      source: 'total', template: '', unit: 'minutes', displayMode: 'time', enabled: true
+      source: 'total', template: '', unit: 'minutes', displayMode: 'time', messageDelayMs: 25, enabled: true
     }, {
       id: 'test-panel-hours', name: 'Panel hours', host: '127.0.0.1', port: udpPort,
-      source: 'total', template: '', unit: 'hours', displayMode: 'time', enabled: true
+      source: 'total', template: '', unit: 'hours', displayMode: 'time', messageDelayMs: 50, enabled: true
     }, {
       id: 'test-panel-label', name: 'Panel label', host: '127.0.0.1', port: udpPort,
       source: 'tramites', template: '', unit: 'auto', displayMode: 'label',
-      colorsEnabled: true, labelColor: '00ff00', enabled: true
+      colorsEnabled: true, labelColor: '00ff00', messageDelayMs: 75, enabled: true
     }, {
       id: 'test-panel-colors', name: 'Panel colors', host: '127.0.0.1', port: udpPort,
       source: 'tramites', template: '', unit: 'auto', displayMode: 'both',
-      colorsEnabled: true, labelColor: '#00ff00', timeColor: 'ff0000', enabled: true
+      colorsEnabled: true, labelColor: '#00ff00', timeColor: 'ff0000', messageDelayMs: 100, enabled: true
     }, {
       id: 'test-panel-map', name: 'Panel map', host: '127.0.0.1', port: bitmapPort,
       source: 'map_gran_santiago', enabled: true
@@ -248,7 +248,7 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
       ...process.env, NODE_ENV: 'test', RNE_TEST_API_BASE_URL: `http://127.0.0.1:${apiPort}`,
       PORT: '0', HOST: '127.0.0.1', RNE_DATA_DIR: dataDir,
       RNE_BITMAP_CHUNK_DELAY_MS: '0',
-      RNE_TEXT_PANEL_STAGGER_MS: '25',
+      RNE_TEXT_PANEL_STAGGER_MS: '0',
       OKI_PRINTER_HOST: '127.0.0.1', OKI_PRINTER_PORT: String(printerPort),
       OKI_PRINTER_STATUS_URL: `http://127.0.0.1:${apiPort}/printer-healthz`
     },
@@ -304,6 +304,7 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
   assert.equal(state.results.tiempo_por_area.hospitalario, 0);
   assert.equal(state.results.unidad_tiempo, 'minutos');
   assert.equal(state.results.version, 3);
+  assert.equal(state.defaultTextPanelStaggerMs, 0);
   assert.equal(state.health.status, 'ok');
   assert.equal(state.events.filter((event) => event.kind === 'api').length, 6);
   assert.equal(state.events.filter((event) => event.kind === 'udp').length, 7);
@@ -314,6 +315,7 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
   assert.equal(coloredPanel.labelColor, '00FF00');
   assert.equal(coloredPanel.timeColor, 'FF0000');
   assert.equal(coloredPanel.colorsEnabled, true);
+  assert.equal(coloredPanel.messageDelayMs, 100);
 
   assert.equal(printerMessages.length, 1);
   const automaticPrint = printerMessages[0].toString('utf8');
@@ -410,6 +412,7 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
   const page = await pageResponse.text();
   assert.match(page, /CHASKI · Control RNE/);
   assert.match(page, /Usar colores RGB/);
+  assert.match(page, /Retraso antes de mostrar el mensaje/);
   assert.match(page, /Mapa de Chile 16×96/);
   assert.match(page, /OKI Microline 320/);
   assert.match(page, /id="printerSubmitButton"/);

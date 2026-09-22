@@ -158,6 +158,12 @@ function validatePanel(candidate, existing = {}) {
   panel.colorsEnabled = panel.colorsEnabled === true;
   panel.labelColor = normalizeRgbColor(panel.labelColor, '00FF00');
   panel.timeColor = normalizeRgbColor(panel.timeColor, 'FF0000');
+  if (panel.messageDelayMs !== undefined) {
+    panel.messageDelayMs = Number(panel.messageDelayMs);
+    if (!Number.isInteger(panel.messageDelayMs) || panel.messageDelayMs < 0 || panel.messageDelayMs > 30_000) {
+      throw new Error('El retraso del mensaje debe estar entre 0 y 30 segundos.');
+    }
+  }
   panel.enabled = panel.enabled !== false;
   if (!panel.name) throw new Error('El panel necesita un nombre.');
   if (!isIpv4OrHostname(panel.host)) throw new Error('La dirección del panel no es válida.');
@@ -432,6 +438,7 @@ function publicState() {
     config,
     apiBaseUrl: API_BASE_URL,
     pollIntervalSeconds: POLL_INTERVAL_MS / 1000,
+    defaultTextPanelStaggerMs: TEXT_PANEL_STAGGER_MS,
     lastPollAt,
     nextPollAt,
     polling,
@@ -775,9 +782,12 @@ async function sendBitmapUdp(panel, payload, reason = 'sync') {
 }
 
 async function sendTextPanels(data) {
-  const enabled = config.panels.filter((panel) => panel.enabled && !isBitmapSource(panel.source));
-  await Promise.all(enabled.map(async (panel, index) => {
-    if (index > 0) await wait(index * TEXT_PANEL_STAGGER_MS);
+  const textPanels = config.panels.filter((panel) => !isBitmapSource(panel.source));
+  const enabled = textPanels.filter((panel) => panel.enabled);
+  await Promise.all(enabled.map(async (panel) => {
+    const routeIndex = textPanels.indexOf(panel);
+    const delayMs = panel.messageDelayMs ?? routeIndex * TEXT_PANEL_STAGGER_MS;
+    if (delayMs > 0) await wait(delayMs);
     return sendUdp(panel, renderPanelMessage(panel, data));
   }));
 }
