@@ -153,7 +153,7 @@ function validatePanel(candidate, existing = {}) {
     : panel.showLabel === false ? 'time' : 'both';
   delete panel.showLabel;
   panel.colorsEnabled = panel.colorsEnabled === true;
-  panel.labelColor = normalizeRgbColor(panel.labelColor, '00FF00');
+  panel.labelColor = normalizeRgbColor(panel.labelColor, 'FFFF00');
   panel.timeColor = normalizeRgbColor(panel.timeColor, 'FF0000');
   if (panel.messageLeadingSpaces !== undefined) {
     panel.messageLeadingSpaces = Number(panel.messageLeadingSpaces);

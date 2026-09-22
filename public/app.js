@@ -422,7 +422,7 @@ function openPanelDialog(panel = null) {
   $('#panelUnit').value = panel?.unit || 'auto';
   $('#panelDisplayMode').value = panel ? panelDisplayMode(panel) : 'both';
   $('#panelColorsEnabled').checked = panel?.colorsEnabled === true;
-  $('#panelLabelColor').value = `#${panel?.labelColor || '00FF00'}`;
+  $('#panelLabelColor').value = `#${panel?.labelColor || 'FFFF00'}`;
   $('#panelTimeColor').value = `#${panel?.timeColor || 'FF0000'}`;
   updateColorValues();
   $('#panelEnabled').checked = panel?.enabled !== false;

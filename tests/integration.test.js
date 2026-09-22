@@ -266,7 +266,7 @@ test('polls RNE and routes the formatted result over UDP', async (context) => {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   assert.deepEqual(udpMessages.sort(), [
-    '2 DÍAS', '[00FF00]  2.835 MIN', '[00FF00]    47,3 H',
+    '2 DÍAS', '[FFFF00]  2.835 MIN', '[FFFF00]    47,3 H',
     '[00FF00]      TRÁMITES', '[00FF00]        TRÁMITES [FF0000]2 DÍAS'
   ].sort());
   assert.ok(bitmapPayload);
